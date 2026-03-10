@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+dist/
+build/
+.env
+*.jks
+*.keystore
+*.p8
+*.p12
+*.pem
+*.mobileprovision
+google-play-service-account.json

@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Boaventura Estoque",
+    "slug": "boaventura-estoque",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "boaventuraestoque",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1e3a5f"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.boaventura.estoque"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#1e3a5f"
+      },
+      "package": "com.boaventura.estoque",
+      "targetSdkVersion": 34,
+      "compileSdkVersion": 34,
+      "buildToolsVersion": "34.0.0",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
