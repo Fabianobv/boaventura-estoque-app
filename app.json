@@ -41,6 +41,12 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d54bb0df-d059-462a-ade7-79af58266743"
+      }
+    },
+    "owner": "fabianobv"
   }
 }
