@@ -22,16 +22,15 @@ const ExpoSecureStoreAdapter = {
 }
 
 // ─── Variáveis de ambiente ─────────────────────────────────────────
-// Defina no arquivo .env (e configure no EAS como secrets de build)
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!
+// Lidas do .env em desenvolvimento; fallback hardcoded para builds EAS.
+// A anon key é uma chave pública (protegida por RLS no Supabase).
+const SUPABASE_URL =
+  process.env.EXPO_PUBLIC_SUPABASE_URL ??
+  "https://nlkyisvvcfkkkrrititr.supabase.co"
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error(
-    "Variáveis EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY " +
-    "devem estar definidas no arquivo .env"
-  )
-}
+const SUPABASE_ANON_KEY =
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sa3lpc3Z2Y2Zra2tycml0aXRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5Njk3NzEsImV4cCI6MjA4ODU0NTc3MX0.qY9vTsMXvOmPvx7AcmL4kRHzhbei0a2UQPvvZgNzQ6o"
 
 // ─── Cliente Supabase ──────────────────────────────────────────────
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useState } from "react"
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Platform,
+  Alert, ActivityIndicator, RefreshControl, Modal, KeyboardAvoidingView,
+  Platform,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { format } from "date-fns"
@@ -51,6 +52,12 @@ export default function AbastecimentoScreen() {
   const [loading,    setLoading]    = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [saving,     setSaving]     = useState(false)
+
+  // Modal de edição (substitui Alert.prompt — iOS only)
+  const [editModalVisible, setEditModalVisible] = useState(false)
+  const [editItem,         setEditItem]         = useState<LancamentoDia | null>(null)
+  const [editValor,        setEditValor]        = useState("")
+  const [editSaving,       setEditSaving]       = useState(false)
 
   // ── Carregamento inicial ─────────────────────────────────────────
   useEffect(() => {
@@ -151,202 +158,252 @@ export default function AbastecimentoScreen() {
     }
   }
 
-  // ── Editar lançamento (ajustar quantidade total do dia) ──────────
+  // ── Editar lançamento — abre modal Android-compatível ────────────
   function handleEditar(item: LancamentoDia) {
-    Alert.prompt(
-      "Editar Lançamento",
-      `Produto: ${item.produto_nome}\n` +
-      `Abastecimento atual: ${item.abastecimento}\n` +
-      `Retirada atual: ${item.retirada}\n\n` +
-      "Informe o novo valor total de abastecimento:",
-      async (novoValor) => {
-        if (novoValor === undefined) return
-        const qtd = parseInt(novoValor, 10)
-        if (isNaN(qtd) || qtd < 0) {
-          Alert.alert("Valor inválido")
-          return
-        }
-        const { error } = await supabase
-          .from("estoque_diario")
-          .update({ abastecimento: qtd, updated_by: user?.id })
-          .eq("data_referencia", data)
-          .eq("deposito_id", depositoId)
-          .eq("produto_id", item.produto_id)
-        if (error) { Alert.alert("Erro", error.message); return }
-        await carregarHistorico()
-      },
-      "plain-text",
-      String(item.abastecimento),
-      "number-pad"
-    )
+    setEditItem(item)
+    setEditValor(String(item.abastecimento))
+    setEditModalVisible(true)
+  }
+
+  async function handleEditConfirm() {
+    if (!editItem) return
+    const qtd = parseInt(editValor, 10)
+    if (isNaN(qtd) || qtd < 0) {
+      Alert.alert("Valor inválido", "Informe um número inteiro maior ou igual a zero.")
+      return
+    }
+    setEditSaving(true)
+    try {
+      const { error } = await supabase
+        .from("estoque_diario")
+        .update({ abastecimento: qtd, updated_by: user?.id })
+        .eq("data_referencia", data)
+        .eq("deposito_id", depositoId)
+        .eq("produto_id", editItem.produto_id)
+      if (error) throw error
+      setEditModalVisible(false)
+      await carregarHistorico()
+    } catch (e) {
+      Alert.alert("Erro", (e as Error).message)
+    } finally {
+      setEditSaving(false)
+    }
   }
 
   const depositoSelecionado = depositos.find(d => d.id === depositoId)
   const produtoSelecionado  = produtos.find(p => p.id === produtoId)
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => {
-          setRefreshing(true)
-          carregarHistorico()
-        }} />
-      }>
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => {
+            setRefreshing(true)
+            carregarHistorico()
+          }} />
+        }>
 
-      {/* ── Formulário ──────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Novo Lançamento</Text>
+        {/* ── Formulário ──────────────────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Novo Lançamento</Text>
 
-        {/* Data */}
-        <Text style={styles.label}>Data</Text>
-        <TextInput
-          style={styles.input}
-          value={data}
-          onChangeText={setData}
-          placeholder="AAAA-MM-DD"
-          keyboardType="numbers-and-punctuation"
-        />
+          {/* Data */}
+          <Text style={styles.label}>Data</Text>
+          <TextInput
+            style={styles.input}
+            value={data}
+            onChangeText={setData}
+            placeholder="AAAA-MM-DD"
+            keyboardType="numbers-and-punctuation"
+          />
 
-        {/* Depósito */}
-        <Text style={styles.label}>Depósito</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-          {depositos.map(d => (
+          {/* Depósito */}
+          <Text style={styles.label}>Depósito</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+            {depositos.map(d => (
+              <TouchableOpacity
+                key={d.id}
+                onPress={() => setDepositoId(d.id)}
+                style={[styles.chip, depositoId === d.id && styles.chipActive]}>
+                <Text style={[styles.chipText, depositoId === d.id && styles.chipTextActive]}>
+                  {d.nome}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Tipo */}
+          <Text style={styles.label}>Tipo de Movimento</Text>
+          <View style={styles.tipoRow}>
             <TouchableOpacity
-              key={d.id}
-              onPress={() => setDepositoId(d.id)}
-              style={[styles.chip, depositoId === d.id && styles.chipActive]}>
-              <Text style={[styles.chipText, depositoId === d.id && styles.chipTextActive]}>
-                {d.nome}
+              onPress={() => setTipo("abastecimento")}
+              style={[styles.tipoBtn, tipo === "abastecimento" && styles.tipoBtnAbast]}>
+              <Ionicons name="arrow-down-circle-outline" size={18}
+                color={tipo === "abastecimento" ? "#fff" : "#64748b"} />
+              <Text style={[styles.tipoBtnText, tipo === "abastecimento" && styles.tipoBtnTextActive]}>
+                Abastecimento
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+            <TouchableOpacity
+              onPress={() => setTipo("retirada")}
+              style={[styles.tipoBtn, tipo === "retirada" && styles.tipoBtnRetirada]}>
+              <Ionicons name="arrow-up-circle-outline" size={18}
+                color={tipo === "retirada" ? "#fff" : "#64748b"} />
+              <Text style={[styles.tipoBtnText, tipo === "retirada" && styles.tipoBtnTextActive]}>
+                Retirada
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Tipo */}
-        <Text style={styles.label}>Tipo de Movimento</Text>
-        <View style={styles.tipoRow}>
+          {/* Produto */}
+          <Text style={styles.label}>Produto</Text>
+          <ScrollView style={styles.produtoList} nestedScrollEnabled>
+            {produtos.map(p => (
+              <TouchableOpacity
+                key={p.id}
+                onPress={() => setProdutoId(p.id)}
+                style={[styles.produtoItem, produtoId === p.id && styles.produtoItemActive]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.produtoNome, produtoId === p.id && styles.produtoNomeActive]}>
+                    {p.nome}
+                  </Text>
+                  <Text style={styles.produtoCateg}>{p.categoria} · {p.marca}</Text>
+                </View>
+                {produtoId === p.id && (
+                  <Ionicons name="checkmark-circle" size={20} color="#1e3a5f" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Quantidade */}
+          <Text style={styles.label}>Quantidade</Text>
+          <TextInput
+            style={[styles.input, styles.inputQtd]}
+            value={quantidade}
+            onChangeText={setQuantidade}
+            placeholder="0"
+            keyboardType="number-pad"
+            returnKeyType="done"
+            onSubmitEditing={handleSalvar}
+          />
+
+          {/* Resumo */}
+          {produtoSelecionado && depositoSelecionado && (
+            <View style={styles.resumo}>
+              <Text style={styles.resumoText}>
+                {tipo === "abastecimento" ? "📥" : "📤"}{" "}
+                <Text style={{ fontWeight: "700" }}>{quantidade || "?"}</Text>
+                {" × "}{produtoSelecionado.nome}
+                {" → "}{depositoSelecionado.nome}
+              </Text>
+            </View>
+          )}
+
+          {/* Botão salvar */}
           <TouchableOpacity
-            onPress={() => setTipo("abastecimento")}
-            style={[styles.tipoBtn, tipo === "abastecimento" && styles.tipoBtnAbast]}>
-            <Ionicons name="arrow-down-circle-outline" size={18}
-              color={tipo === "abastecimento" ? "#fff" : "#64748b"} />
-            <Text style={[styles.tipoBtnText, tipo === "abastecimento" && styles.tipoBtnTextActive]}>
-              Abastecimento
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setTipo("retirada")}
-            style={[styles.tipoBtn, tipo === "retirada" && styles.tipoBtnRetirada]}>
-            <Ionicons name="arrow-up-circle-outline" size={18}
-              color={tipo === "retirada" ? "#fff" : "#64748b"} />
-            <Text style={[styles.tipoBtnText, tipo === "retirada" && styles.tipoBtnTextActive]}>
-              Retirada
-            </Text>
+            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+            onPress={handleSalvar}
+            disabled={saving}
+            activeOpacity={0.8}>
+            {saving
+              ? <ActivityIndicator color="#fff" />
+              : <>
+                  <Ionicons name="save-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.saveBtnText}>Registrar</Text>
+                </>
+            }
           </TouchableOpacity>
         </View>
 
-        {/* Produto */}
-        <Text style={styles.label}>Produto</Text>
-        <ScrollView style={styles.produtoList} nestedScrollEnabled>
-          {produtos.map(p => (
-            <TouchableOpacity
-              key={p.id}
-              onPress={() => setProdutoId(p.id)}
-              style={[styles.produtoItem, produtoId === p.id && styles.produtoItemActive]}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.produtoNome, produtoId === p.id && styles.produtoNomeActive]}>
-                  {p.nome}
-                </Text>
-                <Text style={styles.produtoCateg}>{p.categoria} · {p.marca}</Text>
-              </View>
-              {produtoId === p.id && (
-                <Ionicons name="checkmark-circle" size={20} color="#1e3a5f" />
-              )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Quantidade */}
-        <Text style={styles.label}>Quantidade</Text>
-        <TextInput
-          style={[styles.input, styles.inputQtd]}
-          value={quantidade}
-          onChangeText={setQuantidade}
-          placeholder="0"
-          keyboardType="number-pad"
-          returnKeyType="done"
-          onSubmitEditing={handleSalvar}
-        />
-
-        {/* Resumo */}
-        {produtoSelecionado && depositoSelecionado && (
-          <View style={styles.resumo}>
-            <Text style={styles.resumoText}>
-              {tipo === "abastecimento" ? "📥" : "📤"}{" "}
-              <Text style={{ fontWeight: "700" }}>{quantidade || "?"}</Text>
-              {" × "}{produtoSelecionado.nome}
-              {" → "}{depositoSelecionado.nome}
-            </Text>
-          </View>
-        )}
-
-        {/* Botão salvar */}
-        <TouchableOpacity
-          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-          onPress={handleSalvar}
-          disabled={saving}
-          activeOpacity={0.8}>
-          {saving
-            ? <ActivityIndicator color="#fff" />
-            : <>
-                <Ionicons name="save-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-                <Text style={styles.saveBtnText}>Registrar</Text>
-              </>
-          }
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Histórico do dia ────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>
-          Histórico — {format(new Date(data + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })}
-        </Text>
-
-        {loading ? (
-          <ActivityIndicator color="#1e3a5f" style={{ marginVertical: 20 }} />
-        ) : historico.length === 0 ? (
-          <Text style={styles.emptyText}>
-            Nenhum movimento registrado neste dia/depósito.
+        {/* ── Histórico do dia ────────────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>
+            Histórico — {format(new Date(data + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })}
           </Text>
-        ) : (
-          historico.map(item => (
-            <View key={item.produto_id} style={styles.historicoItem}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.historicoNome}>{item.produto_nome}</Text>
-                <View style={styles.historicoValores}>
-                  {item.abastecimento > 0 && (
-                    <Text style={styles.valorAbast}>↓ {item.abastecimento}</Text>
-                  )}
-                  {item.retirada > 0 && (
-                    <Text style={styles.valorRetirada}>↑ {item.retirada}</Text>
-                  )}
-                  <Text style={styles.valorSaldo}>Saldo: {item.saldo_dia}</Text>
+
+          {loading ? (
+            <ActivityIndicator color="#1e3a5f" style={{ marginVertical: 20 }} />
+          ) : historico.length === 0 ? (
+            <Text style={styles.emptyText}>
+              Nenhum movimento registrado neste dia/depósito.
+            </Text>
+          ) : (
+            historico.map(item => (
+              <View key={item.produto_id} style={styles.historicoItem}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.historicoNome}>{item.produto_nome}</Text>
+                  <View style={styles.historicoValores}>
+                    {item.abastecimento > 0 && (
+                      <Text style={styles.valorAbast}>↓ {item.abastecimento}</Text>
+                    )}
+                    {item.retirada > 0 && (
+                      <Text style={styles.valorRetirada}>↑ {item.retirada}</Text>
+                    )}
+                    <Text style={styles.valorSaldo}>Saldo: {item.saldo_dia}</Text>
+                  </View>
                 </View>
+                <TouchableOpacity
+                  onPress={() => handleEditar(item)}
+                  style={styles.editBtn}>
+                  <Ionicons name="create-outline" size={18} color="#64748b" />
+                </TouchableOpacity>
               </View>
+            ))
+          )}
+        </View>
+
+      </ScrollView>
+
+      {/* ── Modal de edição (Android-compatível) ────────────────── */}
+      <Modal
+        visible={editModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditModalVisible(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Editar Lançamento</Text>
+            {editItem && (
+              <Text style={styles.modalDesc}>
+                {`Produto: ${editItem.produto_nome}\nAbastecimento atual: ${editItem.abastecimento}\nRetirada atual: ${editItem.retirada}`}
+              </Text>
+            )}
+            <Text style={styles.label}>Novo valor total de abastecimento:</Text>
+            <TextInput
+              style={[styles.input, styles.inputQtd]}
+              value={editValor}
+              onChangeText={setEditValor}
+              keyboardType="number-pad"
+              autoFocus
+              selectTextOnFocus
+            />
+            <View style={styles.modalActions}>
               <TouchableOpacity
-                onPress={() => handleEditar(item)}
-                style={styles.editBtn}>
-                <Ionicons name="create-outline" size={18} color="#64748b" />
+                style={styles.modalCancelBtn}
+                onPress={() => setEditModalVisible(false)}
+                disabled={editSaving}>
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirmBtn, editSaving && styles.saveBtnDisabled]}
+                onPress={handleEditConfirm}
+                disabled={editSaving}>
+                {editSaving
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.modalConfirmText}>Confirmar</Text>
+                }
               </TouchableOpacity>
             </View>
-          ))
-        )}
-      </View>
-
-    </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </>
   )
 }
 
@@ -457,4 +514,45 @@ const styles = StyleSheet.create({
   valorRetirada:    { fontSize: 12, color: "#b45309", fontWeight: "600" },
   valorSaldo:       { fontSize: 12, color: "#475569" },
   editBtn:          { padding: 6 },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalBox: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalTitle:   { fontSize: 17, fontWeight: "700", color: BLUE, marginBottom: 8 },
+  modalDesc:    { fontSize: 13, color: "#475569", marginBottom: 4, lineHeight: 20 },
+  modalActions: { flexDirection: "row", gap: 10, marginTop: 18 },
+  modalCancelBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCancelText:  { fontSize: 15, color: "#475569", fontWeight: "600" },
+  modalConfirmBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 10,
+    backgroundColor: BLUE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalConfirmText: { fontSize: 15, color: "#fff", fontWeight: "700" },
 })
