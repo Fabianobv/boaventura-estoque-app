@@ -1,13 +1,9 @@
 /**
- * app/(tabs)/_layout.tsx — Bottom Tab Navigator
- *
- * Exibe apenas as abas permitidas para a role do usuário:
- *  - Abastecimento: qualquer usuário autenticado
- *  - Contagem:      apenas operador e administrador
+ * app/(tabs)/_layout.tsx — Navegação por abas
  */
 import { Tabs, Redirect } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
-import { TouchableOpacity, Text, StyleSheet, View } from "react-native"
+import { TouchableOpacity, StyleSheet } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useAuth } from "@/context/AuthContext"
 
@@ -18,7 +14,6 @@ export default function TabsLayout() {
   const { session, permissions, signOut } = useAuth()
   const insets = useSafeAreaInsets()
 
-  // Segurança: nunca deve chegar aqui sem sessão (AuthGuard redireciona antes)
   if (!session) return <Redirect href="/(auth)/login" />
 
   return (
@@ -32,18 +27,10 @@ export default function TabsLayout() {
           paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           height: 60 + (insets.bottom > 0 ? insets.bottom : 8),
         },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: "600",
-        },
-        headerStyle: {
-          backgroundColor: BLUE,
-        },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        headerStyle: { backgroundColor: BLUE },
         headerTintColor: "#fff",
-        headerTitleStyle: {
-          fontWeight: "700",
-          fontSize: 17,
-        },
+        headerTitleStyle: { fontWeight: "700", fontSize: 17 },
         headerRight: () => (
           <TouchableOpacity onPress={signOut} style={styles.headerBtn}>
             <Ionicons name="log-out-outline" size={22} color="#fff" />
@@ -51,7 +38,10 @@ export default function TabsLayout() {
         ),
       }}>
 
-      {/* Módulo 1: Abastecimento / Retirada — todas as roles */}
+      {/* Rota index (redirect) — oculta na barra */}
+      <Tabs.Screen name="index" options={{ href: null }} />
+
+      {/* Aba 1: Abastecimento / Retirada */}
       <Tabs.Screen
         name="abastecimento"
         options={{
@@ -63,7 +53,7 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* Módulo 2: Contagem — apenas operador/administrador */}
+      {/* Aba 2: Contagem de Estoque */}
       <Tabs.Screen
         name="contagem"
         options={{
@@ -72,18 +62,25 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="clipboard-outline" color={color} size={size} />
           ),
-          // Oculta a aba para visualizadores
           href: permissions?.canContagem ? undefined : null,
         }}
       />
 
+      {/* Aba 3: Perfil do Usuário */}
+      <Tabs.Screen
+        name="perfil"
+        options={{
+          title: "Meu Perfil",
+          tabBarLabel: "Perfil",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-circle-outline" color={color} size={size} />
+          ),
+        }}
+      />
     </Tabs>
   )
 }
 
 const styles = StyleSheet.create({
-  headerBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
+  headerBtn: { paddingHorizontal: 16, paddingVertical: 8 },
 })
