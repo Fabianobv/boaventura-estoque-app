@@ -2,17 +2,17 @@
  * app/(tabs)/abastecimento.tsx — Módulo 1: Abastecimento / Retirada
  *
  * Regras de negócio:
- *  - Vários lançamentos podem ser feitos no mesmo dia/depósito
- *  - Cada lançamento soma ao valor existente na tabela (delta)
- *  - O usuário pode editar um lançamento próprio do dia
- *  - A trigger fn_sync_vasilhame_movimentos atualiza vasilhames automaticamente
+ *  - Cada lançamento cria um registro individual em movimentos_estoque
+ *  - A trigger recalcula os agregados em estoque_diario automaticamente
+ *  - A trigger fn_sync_vasilhame_movimentos_v2 atualiza vasilhames automaticamente
+ *  - Edição de movimentos individuais é feita pelo painel web
  */
 import { useCallback, useEffect, useState } from "react"
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Modal, KeyboardAvoidingView,
-  Platform,
+  Alert, ActivityIndicator, RefreshControl,
 } from "react-native"
+
 import { Ionicons } from "@expo/vector-icons"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
@@ -41,6 +41,7 @@ export default function AbastecimentoScreen() {
   const [depositoId, setDepositoId] = useState("")
   const [produtoId,  setProdutoId]  = useState("")
   const [quantidade, setQuantidade] = useState("")
+  const [obs,        setObs]        = useState("")
   const [tipo,       setTipo]       = useState<Tipo>("abastecimento")
 
   // Dados
@@ -52,12 +53,6 @@ export default function AbastecimentoScreen() {
   const [loading,    setLoading]    = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [saving,     setSaving]     = useState(false)
-
-  // Modal de edição (substitui Alert.prompt — iOS only)
-  const [editModalVisible, setEditModalVisible] = useState(false)
-  const [editItem,         setEditItem]         = useState<LancamentoDia | null>(null)
-  const [editValor,        setEditValor]        = useState("")
-  const [editSaving,       setEditSaving]       = useState(false)
 
   // ── Carregamento inicial ─────────────────────────────────────────
   useEffect(() => {
@@ -105,7 +100,7 @@ export default function AbastecimentoScreen() {
 
   useEffect(() => { carregarHistorico() }, [carregarHistorico])
 
-  // ── Salvar lançamento ────────────────────────────────────────────
+  // ── Salvar lançamento (cria movimento individual) ────────────────
   async function handleSalvar() {
     const qtd = parseInt(quantidade, 10)
     if (!depositoId || !produtoId) {
@@ -119,36 +114,20 @@ export default function AbastecimentoScreen() {
 
     setSaving(true)
     try {
-      // Busca a linha atual do dia
-      const { data: linha } = await supabase
-        .from("estoque_diario")
-        .select("id, abastecimento, retirada")
-        .eq("data_referencia", data)
-        .eq("deposito_id", depositoId)
-        .eq("produto_id", produtoId)
-        .maybeSingle()
-
-      const novoAbast   = tipo === "abastecimento" ? (linha?.abastecimento ?? 0) + qtd : (linha?.abastecimento ?? 0)
-      const novoRetirada = tipo === "retirada"     ? (linha?.retirada      ?? 0) + qtd : (linha?.retirada      ?? 0)
-
-      // UPSERT na linha do estoque (a trigger atualiza vasilhames automaticamente)
-      const { error } = await supabase
-        .from("estoque_diario")
-        .upsert(
-          {
-            data_referencia: data,
-            deposito_id:     depositoId,
-            produto_id:      produtoId,
-            abastecimento:   novoAbast,
-            retirada:        novoRetirada,
-            updated_by:      user?.id,
-          },
-          { onConflict: "data_referencia,deposito_id,produto_id" }
-        )
+      // Insere um movimento individual — a trigger recalcula o agregado automaticamente
+      const { error } = await supabase.rpc("inserir_movimento", {
+        p_data:        data,
+        p_deposito_id: depositoId,
+        p_produto_id:  produtoId,
+        p_tipo:        tipo,
+        p_quantidade:  qtd,
+        p_obs:         obs.trim() || null,
+      })
 
       if (error) throw error
 
       setQuantidade("")
+      setObs("")
       Alert.alert("✓ Salvo", `${tipo === "abastecimento" ? "Abastecimento" : "Retirada"} de ${qtd} unidade(s) registrado!`)
       await carregarHistorico()
     } catch (e) {
@@ -158,53 +137,20 @@ export default function AbastecimentoScreen() {
     }
   }
 
-  // ── Editar lançamento — abre modal Android-compatível ────────────
-  function handleEditar(item: LancamentoDia) {
-    setEditItem(item)
-    setEditValor(String(item.abastecimento))
-    setEditModalVisible(true)
-  }
-
-  async function handleEditConfirm() {
-    if (!editItem) return
-    const qtd = parseInt(editValor, 10)
-    if (isNaN(qtd) || qtd < 0) {
-      Alert.alert("Valor inválido", "Informe um número inteiro maior ou igual a zero.")
-      return
-    }
-    setEditSaving(true)
-    try {
-      const { error } = await supabase
-        .from("estoque_diario")
-        .update({ abastecimento: qtd, updated_by: user?.id })
-        .eq("data_referencia", data)
-        .eq("deposito_id", depositoId)
-        .eq("produto_id", editItem.produto_id)
-      if (error) throw error
-      setEditModalVisible(false)
-      await carregarHistorico()
-    } catch (e) {
-      Alert.alert("Erro", (e as Error).message)
-    } finally {
-      setEditSaving(false)
-    }
-  }
-
   const depositoSelecionado = depositos.find(d => d.id === depositoId)
   const produtoSelecionado  = produtos.find(p => p.id === produtoId)
 
   return (
-    <>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => {
-            setRefreshing(true)
-            carregarHistorico()
-          }} />
-        }>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={() => {
+          setRefreshing(true)
+          carregarHistorico()
+        }} />
+      }>
 
         {/* ── Formulário ──────────────────────────────────────────── */}
         <View style={styles.card}>
@@ -287,6 +233,16 @@ export default function AbastecimentoScreen() {
             onChangeText={setQuantidade}
             placeholder="0"
             keyboardType="number-pad"
+            returnKeyType="next"
+          />
+
+          {/* Observação (opcional) */}
+          <Text style={styles.label}>Observação (opcional)</Text>
+          <TextInput
+            style={styles.input}
+            value={obs}
+            onChangeText={setObs}
+            placeholder="Ex: entrega tarde, fornecedor X..."
             returnKeyType="done"
             onSubmitEditing={handleSalvar}
           />
@@ -346,64 +302,12 @@ export default function AbastecimentoScreen() {
                     <Text style={styles.valorSaldo}>Saldo: {item.saldo_dia}</Text>
                   </View>
                 </View>
-                <TouchableOpacity
-                  onPress={() => handleEditar(item)}
-                  style={styles.editBtn}>
-                  <Ionicons name="create-outline" size={18} color="#64748b" />
-                </TouchableOpacity>
               </View>
             ))
           )}
         </View>
 
-      </ScrollView>
-
-      {/* ── Modal de edição (Android-compatível) ────────────────── */}
-      <Modal
-        visible={editModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditModalVisible(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Editar Lançamento</Text>
-            {editItem && (
-              <Text style={styles.modalDesc}>
-                {`Produto: ${editItem.produto_nome}\nAbastecimento atual: ${editItem.abastecimento}\nRetirada atual: ${editItem.retirada}`}
-              </Text>
-            )}
-            <Text style={styles.label}>Novo valor total de abastecimento:</Text>
-            <TextInput
-              style={[styles.input, styles.inputQtd]}
-              value={editValor}
-              onChangeText={setEditValor}
-              keyboardType="number-pad"
-              autoFocus
-              selectTextOnFocus
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setEditModalVisible(false)}
-                disabled={editSaving}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirmBtn, editSaving && styles.saveBtnDisabled]}
-                onPress={handleEditConfirm}
-                disabled={editSaving}>
-                {editSaving
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.modalConfirmText}>Confirmar</Text>
-                }
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </>
+    </ScrollView>
   )
 }
 
@@ -513,46 +417,4 @@ const styles = StyleSheet.create({
   valorAbast:       { fontSize: 12, color: "#1d4ed8", fontWeight: "600" },
   valorRetirada:    { fontSize: 12, color: "#b45309", fontWeight: "600" },
   valorSaldo:       { fontSize: 12, color: "#475569" },
-  editBtn:          { padding: 6 },
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  modalBox: {
-    width: "100%",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalTitle:   { fontSize: 17, fontWeight: "700", color: BLUE, marginBottom: 8 },
-  modalDesc:    { fontSize: 13, color: "#475569", marginBottom: 4, lineHeight: 20 },
-  modalActions: { flexDirection: "row", gap: 10, marginTop: 18 },
-  modalCancelBtn: {
-    flex: 1,
-    height: 46,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: "#cbd5e1",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalCancelText:  { fontSize: 15, color: "#475569", fontWeight: "600" },
-  modalConfirmBtn: {
-    flex: 1,
-    height: 46,
-    borderRadius: 10,
-    backgroundColor: BLUE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalConfirmText: { fontSize: 15, color: "#fff", fontWeight: "700" },
 })
