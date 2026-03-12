@@ -62,12 +62,12 @@ function Stepper({
   )
 }
 const stepStyles = StyleSheet.create({
-  row:          { flexDirection: "row", alignItems: "center", gap: 4 },
-  btn:          { width: 28, height: 28, borderRadius: 7, backgroundColor: "#1e3a5f", alignItems: "center", justifyContent: "center" },
+  row:          { flexDirection: "row", alignItems: "center", gap: 2 },
+  btn:          { width: 24, height: 24, borderRadius: 6, backgroundColor: "#1e3a5f", alignItems: "center", justifyContent: "center" },
   btnDisabled:  { backgroundColor: "#cbd5e1" },
-  btnText:      { color: "#fff", fontSize: 18, fontWeight: "700", lineHeight: 22 },
+  btnText:      { color: "#fff", fontSize: 16, fontWeight: "700", lineHeight: 20 },
   btnTextDisabled: { color: "#94a3b8" },
-  val:          { minWidth: 32, textAlign: "center", fontSize: 17, fontWeight: "700", color: "#1e293b" },
+  val:          { minWidth: 26, textAlign: "center", fontSize: 15, fontWeight: "700", color: "#1e293b" },
   valDisabled:  { color: "#94a3b8" },
 })
 
@@ -171,7 +171,6 @@ export default function ContagemScreen() {
         ].join(","))
         .eq("data_referencia", isoData)
         .eq("deposito_id", depositoId)
-        .eq("is_vasilhame", false)
 
       if (error) throw error
 
@@ -505,8 +504,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
   },
   itemNome: { fontSize: 14, fontWeight: "700", color: "#1e293b", marginBottom: 10 },
-  itemRow: { flexDirection: "row", gap: 4 },
-  itemCol: { flex: 1, alignItems: "center" },
+  itemRow: { flexDirection: "row", gap: 2 },
+  itemCol: { flex: 1, alignItems: "center", overflow: "hidden" },
   itemLabel: { fontSize: 10, fontWeight: "600", color: "#94a3b8", marginBottom: 4, textTransform: "uppercase" },
   itemValorNeutro: { fontSize: 18, fontWeight: "700", color: "#334155" },
   itemValorDif: { fontSize: 18, fontWeight: "700" },

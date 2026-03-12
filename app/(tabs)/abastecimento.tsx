@@ -190,7 +190,6 @@ export default function AbastecimentoScreen() {
       supabase.from("produtos")
         .select("id, nome, categoria, marca, is_vasilhame, ordem_exibicao, ativo")
         .eq("ativo", true)
-        .eq("is_vasilhame", false)
         .order("ordem_exibicao"),
     ]).then(([deps, prods]) => {
       if (deps.data) {
@@ -490,7 +489,7 @@ export default function AbastecimentoScreen() {
         }
         renderItem={({ item: lote }) => {
           const totalLote = lote.movimentos.reduce((s, m) => s + m.quantidade, 0)
-          const hora = format(new Date(lote.created_at), "HH:mm")
+          const hora = format(new Date(lote.created_at), "dd/MM HH:mm")
           const isAbast = lote.tipo === "abastecimento"
           return (
             <TouchableOpacity
