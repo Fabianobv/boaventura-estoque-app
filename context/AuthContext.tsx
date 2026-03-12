@@ -3,7 +3,7 @@
  *
  * Contexto global de autenticação.
  * Lê a role do usuário via JWT Custom Claims (campo user_role)
- * — idêntico ao sistema web — e expõe permissões derivadas.
+ * e carrega as permissões granulares da tabela user_permissions.
  */
 import React, {
   createContext, useContext, useEffect, useState, useCallback,
@@ -28,7 +28,6 @@ interface AuthContextValue {
 function getRoleFromSession(session: Session | null): AppRole {
   if (!session) return "visualizador"
   try {
-    // O payload JWT é base64url — decodificamos a parte do payload
     const payload = JSON.parse(
       atob(session.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))
     )
@@ -39,17 +38,34 @@ function getRoleFromSession(session: Session | null): AppRole {
   }
 }
 
-function buildPermissions(role: AppRole): UserPermissions {
+function buildBasePermissions(
+  role: AppRole,
+  deposito_ids: string[],
+  modulos: string[]
+): UserPermissions {
   const isAdmin   = role === "administrador"
   const isGerente = role === "administrador" || role === "operador"
+
+  // Se admin, ignora restrições de módulos
+  const effectiveModulos = isAdmin ? [] : modulos
+  const effectiveDepositos = isAdmin ? [] : deposito_ids
+
+  // canAbastecimento: sem restrição de módulo OU módulo app_abastecimento presente
+  const canAbastecimento = effectiveModulos.length === 0
+    || effectiveModulos.includes("app_abastecimento")
+
+  // canContagem: requer pelo menos operador E (sem restrição OU módulo app_contagem)
+  const canContagem = isGerente
+    && (effectiveModulos.length === 0 || effectiveModulos.includes("app_contagem"))
+
   return {
     role,
     isGerente,
     isAdmin,
-    // Qualquer role autenticada pode fazer abastecimento
-    canAbastecimento: true,
-    // Contagem requer pelo menos operador
-    canContagem: isGerente,
+    canAbastecimento,
+    canContagem,
+    deposito_ids: effectiveDepositos,
+    modulos: effectiveModulos,
   }
 }
 
@@ -62,28 +78,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<UserPermissions | null>(null)
   const [loading,     setLoading]     = useState(true)
 
-  const applySession = useCallback((s: Session | null) => {
+  /** Carrega permissões granulares da tabela user_permissions */
+  const loadPermissions = useCallback(async (s: Session, role: AppRole) => {
+    try {
+      const { data } = await supabase
+        .from("user_permissions")
+        .select("deposito_ids, modulos")
+        .eq("user_id", s.user.id)
+        .maybeSingle()
+      const deposito_ids: string[] = data?.deposito_ids ?? []
+      const modulos: string[] = data?.modulos ?? []
+      setPermissions(buildBasePermissions(role, deposito_ids, modulos))
+    } catch {
+      // Em caso de falha, usa apenas a role sem restrições adicionais
+      setPermissions(buildBasePermissions(role, [], []))
+    }
+  }, [])
+
+  const applySession = useCallback(async (s: Session | null) => {
     setSession(s)
     setUser(s?.user ?? null)
     if (s) {
       const role = getRoleFromSession(s)
-      setPermissions(buildPermissions(role))
+      // Carrega permissões granulares do banco
+      await loadPermissions(s, role)
     } else {
       setPermissions(null)
     }
-  }, [])
+  }, [loadPermissions])
 
   useEffect(() => {
     // Carrega sessão persistida (SecureStore)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      applySession(session)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      await applySession(session)
       setLoading(false)
     })
 
     // Escuta mudanças de estado de autenticação em tempo real
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        applySession(session)
+      async (_event, session) => {
+        await applySession(session)
         setLoading(false)
       }
     )

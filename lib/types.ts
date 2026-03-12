@@ -78,11 +78,14 @@ export interface ContagemInput {
   avariado: number
 }
 
-// ─── Permissões derivadas do JWT ───────────────────────────────────
+// ─── Permissões do usuário ─────────────────────────────────────────
 export interface UserPermissions {
   role: AppRole
-  isGerente: boolean   // operador ou administrador
-  isAdmin: boolean     // apenas administrador
-  canAbastecimento: boolean
-  canContagem: boolean
+  isGerente: boolean         // operador ou administrador
+  isAdmin: boolean           // apenas administrador
+  canAbastecimento: boolean  // pode usar aba Abastecimento
+  canContagem: boolean       // pode usar aba Contagem
+  // Permissões granulares da tabela user_permissions
+  deposito_ids: string[]     // vazio = sem restrição
+  modulos: string[]          // vazio = sem restrição
 }

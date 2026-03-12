@@ -134,7 +134,7 @@ interface ItemContagem {
 
 // ─── Tela principal ───────────────────────────────────────────────
 export default function ContagemScreen() {
-  const { user } = useAuth()
+  const { user, permissions } = useAuth()
 
   const [data,        setData]        = useState(hojePT())
   const [depositoId,  setDepositoId]  = useState("")
@@ -146,18 +146,23 @@ export default function ContagemScreen() {
   const [isEditing,   setIsEditing]   = useState(true)   // true = steppers ativos
   const [responsavel, setResponsavel] = useState<string | null>(null)
 
-  // Carrega lista de depósitos
+  // Carrega lista de depósitos (filtrada pelas permissões do usuário)
   useEffect(() => {
     supabase.from("depositos")
       .select("id, nome, ativo")
       .eq("ativo", true).order("nome")
       .then(({ data: deps }) => {
         if (deps) {
-          setDepositos(deps as Deposito[])
-          if (deps.length > 0) setDepositoId(deps[0].id)
+          const allowedIds = permissions?.deposito_ids ?? []
+          const allowed = allowedIds.length > 0
+            ? (deps as Deposito[]).filter(d => allowedIds.includes(d.id))
+            : (deps as Deposito[])
+          setDepositos(allowed)
+          if (allowed.length > 0) setDepositoId(allowed[0].id)
         }
       })
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permissions?.deposito_ids?.join(",")])
 
   // Carrega/recarrega itens do dia+depósito
   const carregarContagem = useCallback(async () => {

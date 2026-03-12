@@ -158,7 +158,7 @@ function Stepper({
 
 // ─── Tela principal ───────────────────────────────────────────────
 export default function AbastecimentoScreen() {
-  const { user } = useAuth()
+  const { user, permissions } = useAuth()
   const [abaAtiva, setAbaAtiva] = useState<"lancamento" | "historico">("lancamento")
 
   // ── Estado: Lançamento ────────────────────────────────────────
@@ -193,8 +193,13 @@ export default function AbastecimentoScreen() {
         .order("ordem_exibicao"),
     ]).then(([deps, prods]) => {
       if (deps.data) {
-        setDepositos(deps.data as Deposito[])
-        if (deps.data.length > 0) setDepositoId(deps.data[0].id)
+        // Filtra pelos depósitos permitidos para este usuário
+        const allowedIds = permissions?.deposito_ids ?? []
+        const allowed = allowedIds.length > 0
+          ? (deps.data as Deposito[]).filter(d => allowedIds.includes(d.id))
+          : (deps.data as Deposito[])
+        setDepositos(allowed)
+        if (allowed.length > 0) setDepositoId(allowed[0].id)
       }
       if (prods.data) {
         supabase.from("categorias").select("nome, ordem").eq("ativo", true)
