@@ -2,16 +2,16 @@
  * app/(tabs)/abastecimento.tsx — Lançamento e Histórico de Movimentos
  *
  * Aba 1 – Lançamento:
- *   • Seleciona data (dd/mm/aaaa), depósito (dropdown), tipo (Abastec./Retirada)
- *   • Lista todos os produtos agrupados por categoria (ordem da tabela categorias)
- *   • Campo de quantidade por produto; salva todos de uma vez no final
+ *   • Data com máscara automática (dd/mm/aaaa)
+ *   • Seleciona depósito e tipo (Abastec./Retirada)
+ *   • Produtos com stepper (+/-) de quantidade
  *
  * Aba 2 – Histórico:
- *   • Movimentos do usuário logado em ordem decrescente
- *   • Filtros: data e depósito
- *   • Editar quantidade, depósito e observação
+ *   • Filtro de dia único + depósito
+ *   • Movimentos agrupados por "lote" (mesmo dep/tipo/minuto)
+ *   • Toque num lote → abre modal de edição com todos os produtos
  */
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, Modal, FlatList,
@@ -22,6 +22,7 @@ import { format, parse, isValid } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/context/AuthContext"
+import { onSync } from "@/lib/syncEvent"
 import type { Deposito, Produto } from "@/lib/types"
 
 // ─── Helpers de data ──────────────────────────────────────────────
@@ -33,8 +34,15 @@ function toPT(isoDate: string): string {
   const d = parse(isoDate, "yyyy-MM-dd", new Date())
   return isValid(d) ? format(d, "dd/MM/yyyy") : isoDate
 }
-function hojeISO() { return format(new Date(), "yyyy-MM-dd") }
-function hojePT()  { return format(new Date(), "dd/MM/yyyy") }
+function hojePT() { return format(new Date(), "dd/MM/yyyy") }
+
+/** Aplica máscara dd/MM/yyyy enquanto o usuário digita apenas números */
+function mascararData(texto: string): string {
+  const nums = texto.replace(/\D/g, "").slice(0, 8)
+  if (nums.length <= 2) return nums
+  if (nums.length <= 4) return `${nums.slice(0, 2)}/${nums.slice(2)}`
+  return `${nums.slice(0, 2)}/${nums.slice(2, 4)}/${nums.slice(4)}`
+}
 
 // ─── Tipos locais ─────────────────────────────────────────────────
 type Tipo = "abastecimento" | "retirada"
@@ -46,7 +54,7 @@ interface ProdutoComQtd extends Produto {
 
 interface MovimentoHistorico {
   id: string
-  data_referencia: string   // ISO
+  data_referencia: string
   deposito_id: string
   deposito_nome: string
   produto_id: string
@@ -56,6 +64,16 @@ interface MovimentoHistorico {
   quantidade: number
   obs: string | null
   created_at: string
+}
+
+interface Lote {
+  key: string
+  data_referencia: string
+  deposito_id: string
+  deposito_nome: string
+  tipo: Tipo
+  created_at: string
+  movimentos: MovimentoHistorico[]
 }
 
 // ─── Componente: Picker de Depósito ───────────────────────────────
@@ -107,6 +125,37 @@ function DepositoPicker({
   )
 }
 
+// ─── Componente: Stepper de Quantidade ────────────────────────────
+function Stepper({
+  value, onChange, minWidth = 60,
+}: { value: string; onChange: (v: string) => void; minWidth?: number }) {
+  const num = parseInt(value, 10) || 0
+  return (
+    <View style={styles.stepperContainer}>
+      <TouchableOpacity
+        onPress={() => onChange(String(Math.max(0, num - 1)))}
+        style={styles.stepperBtn}
+        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+        <Ionicons name="remove" size={18} color={num > 0 ? BLUE : "#cbd5e1"} />
+      </TouchableOpacity>
+      <TextInput
+        style={[styles.qtdInput, { minWidth }]}
+        value={value}
+        onChangeText={v => onChange(v.replace(/[^0-9]/g, ""))}
+        keyboardType="number-pad"
+        placeholder="0"
+        selectTextOnFocus
+      />
+      <TouchableOpacity
+        onPress={() => onChange(String(num + 1))}
+        style={styles.stepperBtn}
+        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+        <Ionicons name="add" size={18} color={BLUE} />
+      </TouchableOpacity>
+    </View>
+  )
+}
+
 // ─── Tela principal ───────────────────────────────────────────────
 export default function AbastecimentoScreen() {
   const { user } = useAuth()
@@ -122,19 +171,17 @@ export default function AbastecimentoScreen() {
   const [saving,      setSaving]      = useState(false)
 
   // ── Estado: Histórico ─────────────────────────────────────────
-  const [dataHistIni,  setDataHistIni]  = useState(hojePT())
-  const [dataHistFim,  setDataHistFim]  = useState(hojePT())
+  const [dataHist,     setDataHist]     = useState(hojePT())
   const [depositoHist, setDepositoHist] = useState("")
   const [historico,    setHistorico]    = useState<MovimentoHistorico[]>([])
   const [loadingHist,  setLoadingHist]  = useState(false)
   const [refreshingH,  setRefreshingH]  = useState(false)
 
-  // ── Estado: Modal edição ──────────────────────────────────────
-  const [editMov,       setEditMov]       = useState<MovimentoHistorico | null>(null)
-  const [editQtd,       setEditQtd]       = useState("")
-  const [editObs,       setEditObs]       = useState("")
-  const [editDeposito,  setEditDeposito]  = useState("")
-  const [editSaving,    setEditSaving]    = useState(false)
+  // ── Estado: Modal edição de lote ──────────────────────────────
+  const [editLote,     setEditLote]    = useState<Lote | null>(null)
+  const [editDeposito, setEditDeposito] = useState("")
+  const [editQtds,     setEditQtds]    = useState<Record<string, string>>({})
+  const [editSaving,   setEditSaving]  = useState(false)
 
   // ── Carregamento de depósitos e produtos ─────────────────────
   useEffect(() => {
@@ -151,7 +198,6 @@ export default function AbastecimentoScreen() {
         if (deps.data.length > 0) setDepositoId(deps.data[0].id)
       }
       if (prods.data) {
-        // Busca a ordem da categoria para cada produto
         supabase.from("categorias").select("nome, ordem").eq("ativo", true)
           .then(({ data: cats }) => {
             const ordemMap: Record<string, number> = {}
@@ -181,25 +227,17 @@ export default function AbastecimentoScreen() {
       Alert.alert("Atenção", "Informe a quantidade para ao menos um produto.")
       return
     }
-
     setSaving(true)
     try {
-      // Insere um movimento individual para cada produto com qtd > 0
-      const promises = comQtd.map(p =>
+      const resultados = await Promise.all(comQtd.map(p =>
         supabase.rpc("inserir_movimento", {
-          p_data:        isoData,
-          p_deposito_id: depositoId,
-          p_produto_id:  p.id,
-          p_tipo:        tipo,
-          p_quantidade:  parseInt(p.qtd, 10),
-          p_obs:         null,
+          p_data: isoData, p_deposito_id: depositoId,
+          p_produto_id: p.id, p_tipo: tipo,
+          p_quantidade: parseInt(p.qtd, 10), p_obs: null,
         })
-      )
-      const resultados = await Promise.all(promises)
+      ))
       const erros = resultados.filter(r => r.error).map(r => r.error!.message)
       if (erros.length > 0) throw new Error(erros.join("; "))
-
-      // Limpa as quantidades
       setProdutos(prev => prev.map(p => ({ ...p, qtd: "" })))
       Alert.alert(
         "✓ Lançamento Salvo",
@@ -212,16 +250,17 @@ export default function AbastecimentoScreen() {
     }
   }
 
-  // ── Carregar histórico ────────────────────────────────────────
+  // ── Carregar histórico (dia único) ────────────────────────────
   const carregarHistorico = useCallback(async () => {
     if (!user) return
     setLoadingHist(true)
     try {
+      const dataISO = toISO(dataHist)
       const { data, error } = await supabase.rpc("buscar_movimentos_usuario", {
-        p_data_inicio:  toISO(dataHistIni),
-        p_data_fim:     toISO(dataHistFim),
-        p_deposito_id:  depositoHist || null,
-        p_user_id:      user.id,
+        p_data_inicio: dataISO,
+        p_data_fim:    dataISO,
+        p_deposito_id: depositoHist || null,
+        p_user_id:     user.id,
       })
       if (error) throw error
       setHistorico((data ?? []) as MovimentoHistorico[])
@@ -231,38 +270,63 @@ export default function AbastecimentoScreen() {
       setLoadingHist(false)
       setRefreshingH(false)
     }
-  }, [user, dataHistIni, dataHistFim, depositoHist])
+  }, [user, dataHist, depositoHist])
 
   useEffect(() => {
     if (abaAtiva === "historico") carregarHistorico()
   }, [abaAtiva, carregarHistorico])
 
-  // ── Abrir modal de edição ─────────────────────────────────────
-  function abrirEditar(mov: MovimentoHistorico) {
-    setEditMov(mov)
-    setEditQtd(String(mov.quantidade))
-    setEditObs(mov.obs ?? "")
-    setEditDeposito(mov.deposito_id)
+  // Listener do botão "Sincronizar" no header
+  useEffect(() => onSync(() => {
+    if (abaAtiva === "historico") carregarHistorico()
+  }), [abaAtiva, carregarHistorico])
+
+  // ── Agrupar histórico em lotes ────────────────────────────────
+  const lotes = useMemo<Lote[]>(() => {
+    const map = new Map<string, MovimentoHistorico[]>()
+    historico.forEach(m => {
+      const minuto = m.created_at.substring(0, 16)
+      const chave = `${m.data_referencia}|${m.deposito_id}|${m.tipo}|${minuto}`
+      if (!map.has(chave)) map.set(chave, [])
+      map.get(chave)!.push(m)
+    })
+    return Array.from(map.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, movs]) => ({
+        key,
+        data_referencia: movs[0].data_referencia,
+        deposito_id: movs[0].deposito_id,
+        deposito_nome: movs[0].deposito_nome,
+        tipo: movs[0].tipo,
+        created_at: movs[0].created_at,
+        movimentos: movs,
+      }))
+  }, [historico])
+
+  // ── Abrir modal edição de lote ────────────────────────────────
+  function abrirEditarLote(lote: Lote) {
+    setEditLote(lote)
+    setEditDeposito(lote.deposito_id)
+    const qtds: Record<string, string> = {}
+    lote.movimentos.forEach(m => { qtds[m.id] = String(m.quantidade) })
+    setEditQtds(qtds)
     setEditSaving(false)
   }
 
-  async function salvarEdicao() {
-    if (!editMov) return
-    const qtd = parseInt(editQtd, 10)
-    if (isNaN(qtd) || qtd <= 0) {
-      Alert.alert("Valor inválido", "Informe uma quantidade maior que zero.")
-      return
-    }
+  async function salvarEdicaoLote() {
+    if (!editLote) return
     setEditSaving(true)
     try {
-      const { error } = await supabase.rpc("atualizar_movimento", {
-        p_id:          editMov.id,
-        p_quantidade:  qtd,
-        p_obs:         editObs.trim() || null,
-        p_deposito_id: editDeposito || null,
-      })
-      if (error) throw error
-      setEditMov(null)
+      await Promise.all(editLote.movimentos.map(m => {
+        const qtd = parseInt(editQtds[m.id] || "0", 10)
+        return supabase.rpc("atualizar_movimento", {
+          p_id:          m.id,
+          p_quantidade:  qtd > 0 ? qtd : m.quantidade,
+          p_obs:         m.obs,
+          p_deposito_id: editDeposito || m.deposito_id,
+        })
+      }))
+      setEditLote(null)
       await carregarHistorico()
     } catch (e) {
       Alert.alert("Erro", (e as Error).message)
@@ -279,11 +343,8 @@ export default function AbastecimentoScreen() {
         .map(p => p.categoria)
     )
   )
-
   const produtosPorCategoria = (cat: string) =>
-    produtos
-      .filter(p => p.categoria === cat)
-      .sort((a, b) => a.ordem_exibicao - b.ordem_exibicao)
+    produtos.filter(p => p.categoria === cat).sort((a, b) => a.ordem_exibicao - b.ordem_exibicao)
 
   function setQtdProduto(id: string, qtd: string) {
     setProdutos(prev => prev.map(p => p.id === id ? { ...p, qtd } : p))
@@ -297,25 +358,21 @@ export default function AbastecimentoScreen() {
         contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
         keyboardShouldPersistTaps="handled">
 
-        {/* Configurações do lançamento */}
         <View style={styles.card}>
-          {/* Data */}
-          <Text style={styles.label}>Data (dd/mm/aaaa)</Text>
+          {/* Data com máscara */}
+          <Text style={styles.label}>Data</Text>
           <TextInput
             style={styles.input}
             value={dataLanc}
-            onChangeText={setDataLanc}
+            onChangeText={v => setDataLanc(mascararData(v))}
             placeholder="dd/mm/aaaa"
-            keyboardType="numbers-and-punctuation"
+            keyboardType="number-pad"
+            maxLength={10}
           />
 
           {/* Depósito */}
           <Text style={[styles.label, { marginTop: 12 }]}>Depósito</Text>
-          <DepositoPicker
-            depositos={depositos}
-            value={depositoId}
-            onChange={setDepositoId}
-          />
+          <DepositoPicker depositos={depositos} value={depositoId} onChange={setDepositoId} />
 
           {/* Tipo */}
           <Text style={[styles.label, { marginTop: 12 }]}>Tipo de Movimento</Text>
@@ -323,8 +380,7 @@ export default function AbastecimentoScreen() {
             <TouchableOpacity
               onPress={() => setTipo("abastecimento")}
               style={[styles.tipoBtn, tipo === "abastecimento" && styles.tipoBtnAbast]}>
-              <Ionicons
-                name="arrow-down-circle-outline" size={18}
+              <Ionicons name="arrow-down-circle-outline" size={18}
                 color={tipo === "abastecimento" ? "#fff" : "#64748b"} />
               <Text style={[styles.tipoBtnText, tipo === "abastecimento" && styles.tipoBtnTextActive]}>
                 Abastecimento
@@ -333,8 +389,7 @@ export default function AbastecimentoScreen() {
             <TouchableOpacity
               onPress={() => setTipo("retirada")}
               style={[styles.tipoBtn, tipo === "retirada" && styles.tipoBtnRetirada]}>
-              <Ionicons
-                name="arrow-up-circle-outline" size={18}
+              <Ionicons name="arrow-up-circle-outline" size={18}
                 color={tipo === "retirada" ? "#fff" : "#64748b"} />
               <Text style={[styles.tipoBtnText, tipo === "retirada" && styles.tipoBtnTextActive]}>
                 Retirada
@@ -343,9 +398,9 @@ export default function AbastecimentoScreen() {
           </View>
         </View>
 
-        {/* Produtos por categoria */}
+        {/* Produtos por categoria com stepper */}
         {loadingLanc ? (
-          <ActivityIndicator color="#1e3a5f" style={{ marginTop: 30 }} />
+          <ActivityIndicator color={BLUE} style={{ marginTop: 30 }} />
         ) : categorias.map(cat => (
           <View key={cat} style={styles.card}>
             <Text style={styles.catHeader}>{cat}</Text>
@@ -355,20 +410,12 @@ export default function AbastecimentoScreen() {
                   <Text style={styles.prodNome}>{p.nome}</Text>
                   <Text style={styles.prodMarca}>{p.marca}</Text>
                 </View>
-                <TextInput
-                  style={styles.qtdInput}
-                  value={p.qtd}
-                  onChangeText={v => setQtdProduto(p.id, v.replace(/[^0-9]/g, ""))}
-                  keyboardType="number-pad"
-                  placeholder="0"
-                  selectTextOnFocus
-                />
+                <Stepper value={p.qtd} onChange={v => setQtdProduto(p.id, v)} />
               </View>
             ))}
           </View>
         ))}
 
-        {/* Botão salvar */}
         <TouchableOpacity
           style={[styles.saveBtn, saving && { opacity: 0.6 }]}
           onPress={handleSalvar}
@@ -388,146 +435,146 @@ export default function AbastecimentoScreen() {
 
   // ── Render: Aba Histórico ─────────────────────────────────────
   function renderHistorico() {
-    return (
-      <View style={{ flex: 1 }}>
-        {/* Filtros */}
-        <View style={styles.filtrosCard}>
-          <View style={styles.filtrosRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>De (dd/mm/aaaa)</Text>
-              <TextInput
-                style={styles.input}
-                value={dataHistIni}
-                onChangeText={setDataHistIni}
-                keyboardType="numbers-and-punctuation"
-                placeholder="dd/mm/aaaa"
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Até</Text>
-              <TextInput
-                style={styles.input}
-                value={dataHistFim}
-                onChangeText={setDataHistFim}
-                keyboardType="numbers-and-punctuation"
-                placeholder="dd/mm/aaaa"
-              />
-            </View>
-          </View>
-          <Text style={[styles.label, { marginTop: 8 }]}>Depósito (opcional)</Text>
-          <DepositoPicker
-            depositos={[{ id: "", nome: "Todos os depósitos", localizacao: null, ativo: true }, ...depositos]}
-            value={depositoHist}
-            onChange={setDepositoHist}
-          />
-          <TouchableOpacity style={styles.filtrarBtn} onPress={carregarHistorico}>
-            <Ionicons name="search-outline" size={15} color="#fff" />
-            <Text style={styles.filtrarBtnText}>Filtrar</Text>
-          </TouchableOpacity>
-        </View>
+    const totalQtd = historico.reduce((s, m) => s + m.quantidade, 0)
 
-        {loadingHist ? (
-          <ActivityIndicator color="#1e3a5f" style={{ marginTop: 40 }} />
-        ) : (
-          <FlatList
-            data={historico}
-            keyExtractor={m => m.id}
-            contentContainerStyle={{ padding: 12, paddingBottom: 20 }}
-            refreshControl={
-              <RefreshControl refreshing={refreshingH} onRefresh={() => {
-                setRefreshingH(true)
-                carregarHistorico()
-              }} />
-            }
-            ListEmptyComponent={
-              <Text style={styles.emptyText}>Nenhum movimento encontrado.</Text>
-            }
-            renderItem={({ item }) => (
-              <View style={styles.histItem}>
-                <View style={styles.histBadge}>
-                  <Ionicons
-                    name={item.tipo === "abastecimento" ? "arrow-down-circle" : "arrow-up-circle"}
-                    size={20}
-                    color={item.tipo === "abastecimento" ? "#1d4ed8" : "#b45309"}
-                  />
-                </View>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.histProduto}>{item.produto_nome}</Text>
-                  <Text style={styles.histDeposito}>
-                    {item.deposito_nome} · {toPT(item.data_referencia)}
-                  </Text>
-                  <View style={styles.histInfoRow}>
-                    <Text style={[styles.histQtd,
-                      item.tipo === "abastecimento" ? { color: "#1d4ed8" } : { color: "#b45309" }]}>
-                      {item.tipo === "abastecimento" ? "↓" : "↑"} {item.quantidade} un.
-                    </Text>
-                    {item.obs && <Text style={styles.histObs}>{item.obs}</Text>}
-                  </View>
-                </View>
-                <TouchableOpacity
-                  onPress={() => abrirEditar(item)}
-                  style={styles.editBtn}>
-                  <Ionicons name="create-outline" size={18} color="#64748b" />
-                </TouchableOpacity>
-              </View>
-            )}
-          />
+    const ListHeader = (
+      <View style={styles.filtrosCard}>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Data</Text>
+            <TextInput
+              style={styles.input}
+              value={dataHist}
+              onChangeText={v => setDataHist(mascararData(v))}
+              keyboardType="number-pad"
+              placeholder="dd/mm/aaaa"
+              maxLength={10}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Depósito (opcional)</Text>
+            <DepositoPicker
+              depositos={[{ id: "", nome: "Todos", localizacao: null, ativo: true }, ...depositos]}
+              value={depositoHist}
+              onChange={setDepositoHist}
+            />
+          </View>
+        </View>
+        <TouchableOpacity style={styles.filtrarBtn} onPress={carregarHistorico}>
+          <Ionicons name="search-outline" size={15} color="#fff" />
+          <Text style={styles.filtrarBtnText}>Buscar</Text>
+        </TouchableOpacity>
+        {lotes.length > 0 && (
+          <Text style={styles.resumoText}>
+            {lotes.length} lote(s) · {historico.length} produto(s) · {totalQtd} un. total
+          </Text>
         )}
       </View>
+    )
+
+    return (
+      <FlatList
+        data={lotes}
+        keyExtractor={l => l.key}
+        contentContainerStyle={{ paddingBottom: 20 }}
+        ListHeaderComponent={ListHeader}
+        refreshControl={
+          <RefreshControl refreshing={refreshingH} onRefresh={() => {
+            setRefreshingH(true); carregarHistorico()
+          }} />
+        }
+        ListEmptyComponent={
+          loadingHist
+            ? <ActivityIndicator color={BLUE} style={{ marginTop: 40 }} />
+            : <Text style={styles.emptyText}>Nenhum lançamento encontrado.</Text>
+        }
+        renderItem={({ item: lote }) => {
+          const totalLote = lote.movimentos.reduce((s, m) => s + m.quantidade, 0)
+          const hora = format(new Date(lote.created_at), "HH:mm")
+          const isAbast = lote.tipo === "abastecimento"
+          return (
+            <TouchableOpacity
+              style={styles.loteCard}
+              onPress={() => abrirEditarLote(lote)}
+              activeOpacity={0.75}>
+              <View style={[styles.loteBadge, { backgroundColor: isAbast ? "#dbeafe" : "#fef3c7" }]}>
+                <Ionicons
+                  name={isAbast ? "arrow-down-circle" : "arrow-up-circle"}
+                  size={22}
+                  color={isAbast ? "#1d4ed8" : "#b45309"}
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.loteDeposito}>{lote.deposito_nome}</Text>
+                <Text style={styles.loteProdutos}>
+                  {lote.movimentos.length} produto(s) · {totalLote} un.
+                </Text>
+                <Text style={styles.loteProdutosList} numberOfLines={1}>
+                  {lote.movimentos.map(m => m.produto_nome).join(", ")}
+                </Text>
+              </View>
+              <View style={{ alignItems: "flex-end", gap: 4 }}>
+                <Text style={[styles.loteTipoText, { color: isAbast ? "#1d4ed8" : "#b45309" }]}>
+                  {isAbast ? "Abastec." : "Retirada"}
+                </Text>
+                <Text style={styles.loteHora}>{hora}</Text>
+                <Ionicons name="chevron-forward" size={14} color="#cbd5e1" />
+              </View>
+            </TouchableOpacity>
+          )
+        }}
+      />
     )
   }
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f1f5f9" }}>
-      {/* Seletor de abas internas */}
+      {/* Abas internas */}
       <View style={styles.tabBar}>
-        <TouchableOpacity
-          style={[styles.tabBtn, abaAtiva === "lancamento" && styles.tabBtnActive]}
-          onPress={() => setAbaAtiva("lancamento")}>
-          <Ionicons
-            name="add-circle-outline" size={16}
-            color={abaAtiva === "lancamento" ? "#1e3a5f" : "#94a3b8"} />
-          <Text style={[styles.tabBtnText, abaAtiva === "lancamento" && styles.tabBtnTextActive]}>
-            Lançamento
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabBtn, abaAtiva === "historico" && styles.tabBtnActive]}
-          onPress={() => setAbaAtiva("historico")}>
-          <Ionicons
-            name="time-outline" size={16}
-            color={abaAtiva === "historico" ? "#1e3a5f" : "#94a3b8"} />
-          <Text style={[styles.tabBtnText, abaAtiva === "historico" && styles.tabBtnTextActive]}>
-            Histórico
-          </Text>
-        </TouchableOpacity>
+        {(["lancamento", "historico"] as const).map(aba => (
+          <TouchableOpacity
+            key={aba}
+            style={[styles.tabBtn, abaAtiva === aba && styles.tabBtnActive]}
+            onPress={() => setAbaAtiva(aba)}>
+            <Ionicons
+              name={aba === "lancamento" ? "add-circle-outline" : "time-outline"}
+              size={16}
+              color={abaAtiva === aba ? BLUE : "#94a3b8"} />
+            <Text style={[styles.tabBtnText, abaAtiva === aba && styles.tabBtnTextActive]}>
+              {aba === "lancamento" ? "Lançamento" : "Histórico"}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {abaAtiva === "lancamento" ? renderLancamento() : renderHistorico()}
 
-      {/* Modal de edição */}
+      {/* Modal de edição de lote */}
       <Modal
-        visible={!!editMov}
+        visible={!!editLote}
         transparent
         animationType="slide"
-        onRequestClose={() => setEditMov(null)}>
+        onRequestClose={() => setEditLote(null)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.modalOverlay}>
-          <View style={styles.editModal}>
+          <View style={[styles.editModal, { maxHeight: "85%" }]}>
+            {/* Cabeçalho */}
             <View style={styles.editModalHeader}>
-              <Text style={styles.editModalTitle}>Editar Movimento</Text>
-              <TouchableOpacity onPress={() => setEditMov(null)}>
+              <View>
+                <Text style={styles.editModalTitle}>Editar Lote</Text>
+                {editLote && (
+                  <Text style={styles.editModalDesc}>
+                    {toPT(editLote.data_referencia)} · {editLote.tipo === "abastecimento" ? "Abastecimento" : "Retirada"}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity onPress={() => setEditLote(null)}>
                 <Ionicons name="close" size={22} color="#64748b" />
               </TouchableOpacity>
             </View>
 
-            {editMov && (
-              <Text style={styles.editModalDesc}>
-                {editMov.produto_nome} · {editMov.tipo === "abastecimento" ? "Abastecimento" : "Retirada"}
-              </Text>
-            )}
-
+            {/* Depósito (aplica a todos) */}
             <Text style={styles.label}>Depósito</Text>
             <DepositoPicker
               depositos={depositos}
@@ -535,34 +582,27 @@ export default function AbastecimentoScreen() {
               onChange={setEditDeposito}
             />
 
-            <Text style={[styles.label, { marginTop: 12 }]}>Quantidade</Text>
-            <TextInput
-              style={[styles.input, styles.inputQtdGrande]}
-              value={editQtd}
-              onChangeText={setEditQtd}
-              keyboardType="number-pad"
-              autoFocus
-              selectTextOnFocus
-            />
+            {/* Produtos do lote */}
+            <ScrollView style={{ marginTop: 14 }} keyboardShouldPersistTaps="handled">
+              {editLote?.movimentos.map(m => (
+                <View key={m.id} style={styles.loteEditRow}>
+                  <Text style={styles.loteEditProd} numberOfLines={2}>{m.produto_nome}</Text>
+                  <Stepper
+                    value={editQtds[m.id] ?? String(m.quantidade)}
+                    onChange={v => setEditQtds(prev => ({ ...prev, [m.id]: v }))}
+                  />
+                </View>
+              ))}
+            </ScrollView>
 
-            <Text style={[styles.label, { marginTop: 12 }]}>Observação (opcional)</Text>
-            <TextInput
-              style={styles.input}
-              value={editObs}
-              onChangeText={setEditObs}
-              placeholder="Ex: ajuste de inventário..."
-            />
-
+            {/* Ações */}
             <View style={styles.editModalActions}>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => setEditMov(null)}
-                disabled={editSaving}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditLote(null)} disabled={editSaving}>
                 <Text style={styles.cancelBtnText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.confirmBtn, editSaving && { opacity: 0.6 }]}
-                onPress={salvarEdicao}
+                onPress={salvarEdicaoLote}
                 disabled={editSaving}>
                 {editSaving
                   ? <ActivityIndicator color="#fff" size="small" />
@@ -581,7 +621,6 @@ export default function AbastecimentoScreen() {
 const BLUE = "#1e3a5f"
 
 const styles = StyleSheet.create({
-  // Abas internas
   tabBar: {
     flexDirection: "row",
     backgroundColor: "#fff",
@@ -602,7 +641,6 @@ const styles = StyleSheet.create({
   tabBtnText: { fontSize: 13, fontWeight: "600", color: "#94a3b8" },
   tabBtnTextActive: { color: BLUE },
 
-  // Cards
   card: {
     backgroundColor: "#fff",
     borderRadius: 14,
@@ -619,10 +657,9 @@ const styles = StyleSheet.create({
     padding: 14,
     borderBottomWidth: 1,
     borderBottomColor: "#e2e8f0",
+    marginBottom: 4,
   },
-  filtrosRow: { flexDirection: "row", gap: 10 },
 
-  // Labels e inputs
   label: { fontSize: 12, fontWeight: "600", color: "#475569", marginBottom: 6 },
   input: {
     height: 44,
@@ -634,9 +671,7 @@ const styles = StyleSheet.create({
     color: "#1e293b",
     backgroundColor: "#f8fafc",
   },
-  inputQtdGrande: { fontSize: 24, fontWeight: "700", textAlign: "center" },
 
-  // Picker de depósito
   picker: {
     height: 44,
     flexDirection: "row",
@@ -674,7 +709,6 @@ const styles = StyleSheet.create({
   pickerItemText: { fontSize: 15, color: "#1e293b" },
   pickerItemTextActive: { color: "#fff", fontWeight: "700" },
 
-  // Tipo de movimento
   tipoRow: { flexDirection: "row", gap: 10 },
   tipoBtn: {
     flex: 1,
@@ -693,7 +727,6 @@ const styles = StyleSheet.create({
   tipoBtnText:       { fontSize: 13, fontWeight: "600", color: "#64748b" },
   tipoBtnTextActive: { color: "#fff" },
 
-  // Categoria header
   catHeader: {
     fontSize: 13, fontWeight: "700", color: "#475569",
     textTransform: "uppercase", letterSpacing: 0.5,
@@ -701,7 +734,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: "#f1f5f9",
   },
 
-  // Produto row no lançamento
   prodRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -711,8 +743,23 @@ const styles = StyleSheet.create({
   },
   prodNome: { fontSize: 14, fontWeight: "600", color: "#1e293b" },
   prodMarca: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
+
+  stepperContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  stepperBtn: {
+    width: 32,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
   qtdInput: {
-    width: 70,
     height: 40,
     borderWidth: 1.5,
     borderColor: "#93c5fd",
@@ -722,9 +769,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#1e293b",
     backgroundColor: "#eff6ff",
+    paddingHorizontal: 4,
+    minWidth: 52,
   },
 
-  // Botão salvar
   saveBtn: {
     flexDirection: "row",
     height: 52,
@@ -737,7 +785,6 @@ const styles = StyleSheet.create({
   },
   saveBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 
-  // Filtrar histórico
   filtrarBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -749,14 +796,19 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   filtrarBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  resumoText: {
+    fontSize: 11, color: "#94a3b8", textAlign: "center",
+    marginTop: 8, fontStyle: "italic",
+  },
 
-  // Item do histórico
-  histItem: {
+  // Cards de lote no histórico
+  loteCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
     borderRadius: 12,
     padding: 14,
+    marginHorizontal: 12,
     marginBottom: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -764,22 +816,37 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 1,
   },
-  histBadge: {
-    width: 36, height: 36,
-    borderRadius: 18,
-    backgroundColor: "#f1f5f9",
+  loteBadge: {
+    width: 42, height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
-  histProduto: { fontSize: 14, fontWeight: "700", color: "#1e293b" },
-  histDeposito: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
-  histInfoRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
-  histQtd: { fontSize: 13, fontWeight: "700" },
-  histObs: { fontSize: 11, color: "#64748b", fontStyle: "italic", flexShrink: 1 },
-  editBtn: { padding: 8 },
+  loteDeposito: { fontSize: 14, fontWeight: "700", color: "#1e293b" },
+  loteProdutos: { fontSize: 12, color: "#64748b", marginTop: 2 },
+  loteProdutosList: { fontSize: 11, color: "#94a3b8", marginTop: 1, flexShrink: 1 },
+  loteTipoText: { fontSize: 12, fontWeight: "700" },
+  loteHora: { fontSize: 11, color: "#94a3b8" },
+
+  loteEditRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  loteEditProd: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1e293b",
+    marginRight: 12,
+  },
+
   emptyText: { textAlign: "center", color: "#94a3b8", fontSize: 14, marginTop: 40 },
 
-  // Modal de edição
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -794,12 +861,12 @@ const styles = StyleSheet.create({
   },
   editModalHeader: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 4,
+    marginBottom: 14,
   },
   editModalTitle: { fontSize: 17, fontWeight: "700", color: BLUE },
-  editModalDesc: { fontSize: 13, color: "#64748b", marginBottom: 14 },
+  editModalDesc: { fontSize: 12, color: "#64748b", marginTop: 2 },
   editModalActions: { flexDirection: "row", gap: 10, marginTop: 20 },
   cancelBtn: {
     flex: 1, height: 46, borderRadius: 10,

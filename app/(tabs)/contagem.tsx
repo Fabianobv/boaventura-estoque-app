@@ -5,9 +5,9 @@
  *  - Uma contagem por dia/depósito
  *  - Outro usuário pode editar ou validar a contagem existente
  *  - Produtos agrupados por categoria (ordem da tabela categorias)
- *  - Data no formato dd/mm/aaaa
+ *  - Data no formato dd/mm/aaaa com máscara automática
  */
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, FlatList, Modal,
@@ -17,7 +17,16 @@ import { format, parse, isValid } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/context/AuthContext"
+import { onSync } from "@/lib/syncEvent"
 import type { Deposito, EstoqueLinha } from "@/lib/types"
+
+// ─── Máscara de data ──────────────────────────────────────────────
+function mascararData(texto: string): string {
+  const digits = texto.replace(/\D/g, "").slice(0, 8)
+  if (digits.length <= 2) return digits
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`
+}
 
 // ─── Helpers de data ──────────────────────────────────────────────
 function toISO(ddmmaaaa: string): string {
@@ -25,6 +34,42 @@ function toISO(ddmmaaaa: string): string {
   return isValid(d) ? format(d, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd")
 }
 function hojePT() { return format(new Date(), "dd/MM/yyyy") }
+
+// ─── Stepper compacto ─────────────────────────────────────────────
+function Stepper({
+  value, onChange, disabled = false,
+}: { value: number; onChange: (v: number) => void; disabled?: boolean }) {
+  return (
+    <View style={stepStyles.row}>
+      <TouchableOpacity
+        style={[stepStyles.btn, disabled && stepStyles.btnDisabled]}
+        onPress={() => !disabled && onChange(Math.max(0, value - 1))}
+        activeOpacity={0.7}
+        disabled={disabled}
+      >
+        <Text style={[stepStyles.btnText, disabled && stepStyles.btnTextDisabled]}>−</Text>
+      </TouchableOpacity>
+      <Text style={[stepStyles.val, disabled && stepStyles.valDisabled]}>{value}</Text>
+      <TouchableOpacity
+        style={[stepStyles.btn, disabled && stepStyles.btnDisabled]}
+        onPress={() => !disabled && onChange(value + 1)}
+        activeOpacity={0.7}
+        disabled={disabled}
+      >
+        <Text style={[stepStyles.btnText, disabled && stepStyles.btnTextDisabled]}>+</Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+const stepStyles = StyleSheet.create({
+  row:          { flexDirection: "row", alignItems: "center", gap: 4 },
+  btn:          { width: 28, height: 28, borderRadius: 7, backgroundColor: "#1e3a5f", alignItems: "center", justifyContent: "center" },
+  btnDisabled:  { backgroundColor: "#cbd5e1" },
+  btnText:      { color: "#fff", fontSize: 18, fontWeight: "700", lineHeight: 22 },
+  btnTextDisabled: { color: "#94a3b8" },
+  val:          { minWidth: 32, textAlign: "center", fontSize: 17, fontWeight: "700", color: "#1e293b" },
+  valDisabled:  { color: "#94a3b8" },
+})
 
 // ─── Picker reutilizável ──────────────────────────────────────────
 function DepositoPicker({
@@ -181,6 +226,9 @@ export default function ContagemScreen() {
 
   useEffect(() => { carregarContagem() }, [carregarContagem])
 
+  // Listener do botão "Sincronizar" no header
+  useEffect(() => onSync(carregarContagem), [carregarContagem])
+
   function updateItem(produtoId: string, campo: "contagem_final" | "avariado", valor: number) {
     setItens(prev => prev.map(it => {
       if (it.produto_id !== produtoId) return it
@@ -225,7 +273,10 @@ export default function ContagemScreen() {
           setSaving(true)
           const { error } = await supabase
             .from("estoque_diario")
-            .update({ updated_by: user?.id })
+            .update({
+              validated_by: user?.id,
+              validated_at: new Date().toISOString(),
+            })
             .eq("data_referencia", toISO(data))
             .eq("deposito_id", depositoId)
           setSaving(false)
@@ -249,38 +300,36 @@ export default function ContagemScreen() {
       <View key={item.produto_id} style={styles.item}>
         <Text style={styles.itemNome}>{item.produto_nome}</Text>
         <View style={styles.itemRow}>
+          {/* Sistema */}
           <View style={styles.itemCol}>
             <Text style={styles.itemLabel}>Sistema</Text>
             <Text style={styles.itemValorNeutro}>{item.saldo_calculado}</Text>
           </View>
+          {/* Contagem */}
           <View style={styles.itemCol}>
             <Text style={styles.itemLabel}>Contagem</Text>
             {canEdit ? (
-              <TextInput
-                style={styles.itemInput}
-                value={String(item.contagem_final)}
-                onChangeText={v => updateItem(item.produto_id, "contagem_final", Math.max(0, parseInt(v || "0", 10)))}
-                keyboardType="number-pad"
-                selectTextOnFocus
+              <Stepper
+                value={item.contagem_final}
+                onChange={v => updateItem(item.produto_id, "contagem_final", v)}
               />
             ) : (
               <Text style={styles.itemValorNeutro}>{item.contagem_final}</Text>
             )}
           </View>
+          {/* Avariado */}
           <View style={styles.itemCol}>
             <Text style={styles.itemLabel}>Avariado</Text>
             {canEdit ? (
-              <TextInput
-                style={styles.itemInput}
-                value={String(item.avariado)}
-                onChangeText={v => updateItem(item.produto_id, "avariado", Math.max(0, parseInt(v || "0", 10)))}
-                keyboardType="number-pad"
-                selectTextOnFocus
+              <Stepper
+                value={item.avariado}
+                onChange={v => updateItem(item.produto_id, "avariado", v)}
               />
             ) : (
               <Text style={styles.itemValorNeutro}>{item.avariado}</Text>
             )}
           </View>
+          {/* Diferença */}
           <View style={styles.itemCol}>
             <Text style={styles.itemLabel}>Diferença</Text>
             <Text style={[styles.itemValorDif, { color: difColor }]}>
@@ -301,9 +350,10 @@ export default function ContagemScreen() {
           <TextInput
             style={styles.controlInput}
             value={data}
-            onChangeText={setData}
+            onChangeText={v => setData(mascararData(v))}
             placeholder="dd/mm/aaaa"
-            keyboardType="numbers-and-punctuation"
+            keyboardType="number-pad"
+            maxLength={10}
           />
         </View>
         <Text style={styles.controlLabel}>Depósito</Text>
@@ -353,7 +403,7 @@ export default function ContagemScreen() {
         </ScrollView>
       )}
 
-      {/* Botões de ação fixos no rodapé */}
+      {/* Botões de ação no rodapé (não fixo) */}
       {!loading && itens.length > 0 && (
         <View style={styles.footer}>
           {status === "outro_usuario" ? (
@@ -379,9 +429,7 @@ export default function ContagemScreen() {
                 ? <ActivityIndicator color="#fff" />
                 : <>
                     <Ionicons name="save-outline" size={18} color="#fff" />
-                    <Text style={styles.footerBtnText}>
-                      {status === "minha" ? "Atualizar Contagem" : "Salvar Contagem"}
-                    </Text>
+                    <Text style={styles.footerBtnText}>Salvar Contagem</Text>
                   </>
               }
             </TouchableOpacity>
@@ -442,7 +490,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: "#bbf7d0",
   },
   bannerText: { fontSize: 13, color: "#92400e" },
-  lista: { padding: 12, paddingBottom: 100 },
+  lista: { padding: 12, paddingBottom: 16 },
   emptyText: { textAlign: "center", color: "#94a3b8", fontSize: 14, marginTop: 40 },
   catHeader: {
     fontSize: 12, fontWeight: "700", color: "#475569",
@@ -457,19 +505,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
   },
   itemNome: { fontSize: 14, fontWeight: "700", color: "#1e293b", marginBottom: 10 },
-  itemRow: { flexDirection: "row", gap: 8 },
+  itemRow: { flexDirection: "row", gap: 4 },
   itemCol: { flex: 1, alignItems: "center" },
   itemLabel: { fontSize: 10, fontWeight: "600", color: "#94a3b8", marginBottom: 4, textTransform: "uppercase" },
   itemValorNeutro: { fontSize: 18, fontWeight: "700", color: "#334155" },
   itemValorDif: { fontSize: 18, fontWeight: "700" },
-  itemInput: {
-    height: 40, width: "100%", borderWidth: 1.5,
-    borderColor: "#93c5fd", borderRadius: 8,
-    textAlign: "center", fontSize: 18, fontWeight: "700",
-    color: "#1e293b", backgroundColor: "#eff6ff",
-  },
   footer: {
-    position: "absolute", bottom: 0, left: 0, right: 0,
     padding: 16, backgroundColor: "#fff",
     borderTopWidth: 1, borderTopColor: "#e2e8f0",
   },

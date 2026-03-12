@@ -6,12 +6,13 @@ import { Ionicons } from "@expo/vector-icons"
 import { TouchableOpacity, StyleSheet } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useAuth } from "@/context/AuthContext"
+import { emitSync } from "@/lib/syncEvent"
 
 const BLUE = "#1e3a5f"
 const GRAY = "#94a3b8"
 
 export default function TabsLayout() {
-  const { session, permissions, signOut } = useAuth()
+  const { session, permissions } = useAuth()
   const insets = useSafeAreaInsets()
 
   if (!session) return <Redirect href="/(auth)/login" />
@@ -32,8 +33,8 @@ export default function TabsLayout() {
         headerTintColor: "#fff",
         headerTitleStyle: { fontWeight: "700", fontSize: 17 },
         headerRight: () => (
-          <TouchableOpacity onPress={signOut} style={styles.headerBtn}>
-            <Ionicons name="log-out-outline" size={22} color="#fff" />
+          <TouchableOpacity onPress={emitSync} style={styles.headerBtn}>
+            <Ionicons name="sync-outline" size={22} color="#fff" />
           </TouchableOpacity>
         ),
       }}>
