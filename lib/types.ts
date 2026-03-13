@@ -86,6 +86,7 @@ export interface UserPermissions {
   canAbastecimento: boolean  // pode usar aba Abastecimento
   canContagem: boolean       // pode usar aba Contagem
   // Permissões granulares da tabela user_permissions
-  deposito_ids: string[]     // vazio = sem restrição
-  modulos: string[]          // vazio = sem restrição
+  deposito_ids: string[]      // vazio = sem restrição de visualização
+  deposito_edit_ids: string[] // depósitos com permissão de edição (admin: [] = todos)
+  modulos: string[]           // vazio = sem restrição
 }

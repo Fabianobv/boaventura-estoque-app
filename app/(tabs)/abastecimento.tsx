@@ -193,11 +193,13 @@ export default function AbastecimentoScreen() {
         .order("ordem_exibicao"),
     ]).then(([deps, prods]) => {
       if (deps.data) {
-        // Filtra pelos depósitos permitidos para este usuário
-        const allowedIds = permissions?.deposito_ids ?? []
-        const allowed = allowedIds.length > 0
-          ? (deps.data as Deposito[]).filter(d => allowedIds.includes(d.id))
-          : (deps.data as Deposito[])
+        // Lançamento: filtra pelos depósitos com permissão de EDIÇÃO
+        const editIds = permissions?.deposito_edit_ids ?? []
+        const allowed = permissions?.isAdmin
+          ? (deps.data as Deposito[])
+          : editIds.length > 0
+            ? (deps.data as Deposito[]).filter(d => editIds.includes(d.id))
+            : []
         setDepositos(allowed)
         if (allowed.length > 0) setDepositoId(allowed[0].id)
       }

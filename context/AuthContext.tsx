@@ -41,14 +41,17 @@ function getRoleFromSession(session: Session | null): AppRole {
 function buildBasePermissions(
   role: AppRole,
   deposito_ids: string[],
+  deposito_edit_ids: string[],
   modulos: string[]
 ): UserPermissions {
   const isAdmin   = role === "administrador"
   const isGerente = role === "administrador" || role === "operador"
 
-  // Se admin, ignora restrições de módulos
-  const effectiveModulos = isAdmin ? [] : modulos
-  const effectiveDepositos = isAdmin ? [] : deposito_ids
+  // Se admin, ignora restrições de módulos e depósitos
+  const effectiveModulos    = isAdmin ? [] : modulos
+  const effectiveDepositos  = isAdmin ? [] : deposito_ids
+  // Admin: [] = todos os depósitos têm edição (interpretado junto com isAdmin nos componentes)
+  const effectiveEditIds    = isAdmin ? [] : deposito_edit_ids
 
   // canAbastecimento: sem restrição de módulo OU módulo app_abastecimento presente
   const canAbastecimento = effectiveModulos.length === 0
@@ -65,6 +68,7 @@ function buildBasePermissions(
     canAbastecimento,
     canContagem,
     deposito_ids: effectiveDepositos,
+    deposito_edit_ids: effectiveEditIds,
     modulos: effectiveModulos,
   }
 }
@@ -83,15 +87,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data } = await supabase
         .from("user_permissions")
-        .select("deposito_ids, modulos")
+        .select("deposito_ids, deposito_edit_ids, modulos")
         .eq("user_id", s.user.id)
         .maybeSingle()
-      const deposito_ids: string[] = data?.deposito_ids ?? []
-      const modulos: string[] = data?.modulos ?? []
-      setPermissions(buildBasePermissions(role, deposito_ids, modulos))
+      const deposito_ids: string[]      = data?.deposito_ids      ?? []
+      const deposito_edit_ids: string[] = data?.deposito_edit_ids ?? []
+      const modulos: string[]           = data?.modulos           ?? []
+      setPermissions(buildBasePermissions(role, deposito_ids, deposito_edit_ids, modulos))
     } catch {
       // Em caso de falha, usa apenas a role sem restrições adicionais
-      setPermissions(buildBasePermissions(role, [], []))
+      setPermissions(buildBasePermissions(role, [], [], []))
     }
   }, [])
 

@@ -153,16 +153,19 @@ export default function ContagemScreen() {
       .eq("ativo", true).order("nome")
       .then(({ data: deps }) => {
         if (deps) {
-          const allowedIds = permissions?.deposito_ids ?? []
-          const allowed = allowedIds.length > 0
-            ? (deps as Deposito[]).filter(d => allowedIds.includes(d.id))
-            : (deps as Deposito[])
+          // Contagem: filtra pelos depósitos com permissão de EDIÇÃO
+          const editIds = permissions?.deposito_edit_ids ?? []
+          const allowed = permissions?.isAdmin
+            ? (deps as Deposito[])
+            : editIds.length > 0
+              ? (deps as Deposito[]).filter(d => editIds.includes(d.id))
+              : []
           setDepositos(allowed)
           if (allowed.length > 0) setDepositoId(allowed[0].id)
         }
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [permissions?.deposito_ids?.join(",")])
+  }, [permissions?.deposito_edit_ids?.join(",")])
 
   // Carrega/recarrega itens do dia+depósito
   const carregarContagem = useCallback(async () => {
