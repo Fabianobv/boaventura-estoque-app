@@ -6,7 +6,7 @@
  * e carrega as permissões granulares da tabela user_permissions.
  */
 import React, {
-  createContext, useContext, useEffect, useState, useCallback,
+  createContext, useContext, useEffect, useState, useCallback, useMemo,
 } from "react"
 import { Session, User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
@@ -142,8 +142,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut()
   }, [])
 
+  // Memoize o context value para evitar re-renders desnecessários dos consumers
+  const contextValue = useMemo(() => ({
+    session, user, permissions, loading, signIn, signOut,
+  }), [session, user, permissions, loading, signIn, signOut])
+
   return (
-    <AuthContext.Provider value={{ session, user, permissions, loading, signIn, signOut }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   )

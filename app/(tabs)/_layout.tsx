@@ -5,6 +5,7 @@ import { Tabs, Redirect } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
 import { TouchableOpacity, StyleSheet } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import { useState, useCallback } from "react"
 import { useAuth } from "@/context/AuthContext"
 import { emitSync } from "@/lib/syncEvent"
 
@@ -14,6 +15,15 @@ const GRAY = "#94a3b8"
 export default function TabsLayout() {
   const { session, permissions } = useAuth()
   const insets = useSafeAreaInsets()
+  const [syncing, setSyncing] = useState(false)
+
+  // Debounce para o botão de sincronização (2 segundos)
+  const handleSync = useCallback(() => {
+    if (syncing) return
+    setSyncing(true)
+    emitSync()
+    setTimeout(() => setSyncing(false), 2000)
+  }, [syncing])
 
   if (!session) return <Redirect href="/(auth)/login" />
 
@@ -33,7 +43,7 @@ export default function TabsLayout() {
         headerTintColor: "#fff",
         headerTitleStyle: { fontWeight: "700", fontSize: 17 },
         headerRight: () => (
-          <TouchableOpacity onPress={emitSync} style={styles.headerBtn}>
+          <TouchableOpacity onPress={handleSync} style={[styles.headerBtn, syncing && { opacity: 0.5 }]} disabled={syncing}>
             <Ionicons name="sync-outline" size={22} color="#fff" />
           </TouchableOpacity>
         ),

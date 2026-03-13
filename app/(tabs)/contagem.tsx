@@ -7,10 +7,10 @@
  *  - Editar → qualquer usuário volta para modo edição e pode salvar novamente
  *  - Validar → registra validated_by + validated_at no banco
  */
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, FlatList, Modal,
+  View, Text, TouchableOpacity, TextInput, StyleSheet,
+  Alert, ActivityIndicator, RefreshControl, FlatList, Modal, SectionList,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { format, parse, isValid } from "date-fns"
@@ -146,6 +146,12 @@ export default function ContagemScreen() {
   const [isEditing,   setIsEditing]   = useState(true)   // true = steppers ativos
   const [responsavel, setResponsavel] = useState<string | null>(null)
 
+  // Memoize deposit IDs string para evitar re-renders desnecessários
+  const depositoIdsString = useMemo(
+    () => permissions?.deposito_edit_ids?.join(",") ?? "",
+    [permissions?.deposito_edit_ids]
+  )
+
   // Carrega lista de depósitos (filtrada pelas permissões do usuário)
   useEffect(() => {
     supabase.from("depositos")
@@ -164,8 +170,7 @@ export default function ContagemScreen() {
           if (allowed.length > 0) setDepositoId(allowed[0].id)
         }
       })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [permissions?.deposito_edit_ids?.join(",")])
+  }, [depositoIdsString, permissions?.isAdmin])
 
   // Carrega/recarrega itens do dia+depósito
   const carregarContagem = useCallback(async () => {
@@ -308,9 +313,10 @@ export default function ContagemScreen() {
     )
   }
 
-  // Agrupamento por categoria
-  const categorias = Array.from(new Set(itens.map(i => i.produto_categ)))
-  const itensDeCat = (cat: string) => itens.filter(i => i.produto_categ === cat)
+  // Agrupamento por categoria (memoizado)
+  const categorias = useMemo(() => Array.from(new Set(itens.map(i => i.produto_categ))), [itens])
+
+  const itensDeCat = useCallback((cat: string) => itens.filter(i => i.produto_categ === cat), [itens])
 
   // ── Card de um produto ────────────────────────────────────────
   function renderItem(item: ItemContagem) {
@@ -398,30 +404,34 @@ export default function ContagemScreen() {
         )
       )}
 
-      {/* Lista de produtos */}
+      {/* Lista de produtos - agora usa SectionList para melhor performance */}
       {loading ? (
         <ActivityIndicator color={BLUE} style={{ flex: 1, marginTop: 40 }} />
+      ) : itens.length === 0 ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <Text style={styles.emptyText}>Nenhum produto encontrado.</Text>
+        </View>
       ) : (
-        <ScrollView
+        <SectionList
+          sections={categorias.map(cat => ({
+            title: cat,
+            data: itensDeCat(cat),
+          }))}
+          keyExtractor={(item) => item.produto_id}
+          renderItem={({ item }) => renderItem(item)}
+          renderSectionHeader={({ section: { title } }) => (
+            <Text style={styles.catHeader}>{title}</Text>
+          )}
           contentContainerStyle={styles.lista}
-          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => { setRefreshing(true); carregarContagem() }}
             />
-          }>
-          {itens.length === 0 ? (
-            <Text style={styles.emptyText}>Nenhum produto encontrado.</Text>
-          ) : (
-            categorias.map(cat => (
-              <View key={cat}>
-                <Text style={styles.catHeader}>{cat}</Text>
-                {itensDeCat(cat).map(item => renderItem(item))}
-              </View>
-            ))
-          )}
-        </ScrollView>
+          }
+          maxToRenderPerBatch={30}
+          updateCellsBatchingPeriod={50}
+        />
       )}
 
       {/* Rodapé com botões de ação */}

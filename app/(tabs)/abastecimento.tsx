@@ -11,7 +11,7 @@
  *   • Movimentos agrupados por "lote" (mesmo dep/tipo/minuto)
  *   • Toque num lote → abre modal de edição com todos os produtos
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, Modal, FlatList,
@@ -77,7 +77,7 @@ interface Lote {
 }
 
 // ─── Componente: Picker de Depósito ───────────────────────────────
-function DepositoPicker({
+const DepositoPicker = React.memo(function DepositoPicker({
   depositos, value, onChange, disabled,
 }: {
   depositos: Deposito[]
@@ -123,10 +123,10 @@ function DepositoPicker({
       </Modal>
     </>
   )
-}
+})
 
 // ─── Componente: Stepper de Quantidade ────────────────────────────
-function Stepper({
+const Stepper = React.memo(function Stepper({
   value, onChange, minWidth = 60,
 }: { value: string; onChange: (v: string) => void; minWidth?: number }) {
   const num = parseInt(value, 10) || 0
@@ -154,7 +154,7 @@ function Stepper({
       </TouchableOpacity>
     </View>
   )
-}
+})
 
 // ─── Tela principal ───────────────────────────────────────────────
 export default function AbastecimentoScreen() {
@@ -256,6 +256,9 @@ export default function AbastecimentoScreen() {
     }
   }
 
+  // ── Debounce helper para carregarHistorico ────────────────────
+  const debounceRef = useRef<NodeJS.Timeout | null>(null)
+
   // ── Carregar histórico (dia único) ────────────────────────────
   const carregarHistorico = useCallback(async () => {
     if (!user) return
@@ -278,14 +281,22 @@ export default function AbastecimentoScreen() {
     }
   }, [user, dataHist, depositoHist])
 
+  // Debounce para filtros de histórico (300ms)
+  const carregarHistoricoDebounced = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      carregarHistorico()
+    }, 300)
+  }, [carregarHistorico])
+
   useEffect(() => {
-    if (abaAtiva === "historico") carregarHistorico()
-  }, [abaAtiva, carregarHistorico])
+    if (abaAtiva === "historico") carregarHistoricoDebounced()
+  }, [abaAtiva, carregarHistoricoDebounced])
 
   // Listener do botão "Sincronizar" no header
   useEffect(() => onSync(() => {
-    if (abaAtiva === "historico") carregarHistorico()
-  }), [abaAtiva, carregarHistorico])
+    if (abaAtiva === "historico") carregarHistoricoDebounced()
+  }), [abaAtiva, carregarHistoricoDebounced])
 
   // ── Agrupar histórico em lotes ────────────────────────────────
   const lotes = useMemo<Lote[]>(() => {
@@ -342,19 +353,25 @@ export default function AbastecimentoScreen() {
   }
 
   // ── Produtos agrupados por categoria ─────────────────────────
-  const categorias = Array.from(
-    new Set(
-      [...produtos]
-        .sort((a, b) => a.categoria_ordem - b.categoria_ordem || a.ordem_exibicao - b.ordem_exibicao)
-        .map(p => p.categoria)
-    )
+  const categorias = useMemo(
+    () => Array.from(
+      new Set(
+        [...produtos]
+          .sort((a, b) => a.categoria_ordem - b.categoria_ordem || a.ordem_exibicao - b.ordem_exibicao)
+          .map(p => p.categoria)
+      )
+    ),
+    [produtos]
   )
-  const produtosPorCategoria = (cat: string) =>
-    produtos.filter(p => p.categoria === cat).sort((a, b) => a.ordem_exibicao - b.ordem_exibicao)
 
-  function setQtdProduto(id: string, qtd: string) {
+  const produtosPorCategoria = useCallback(
+    (cat: string) => produtos.filter(p => p.categoria === cat).sort((a, b) => a.ordem_exibicao - b.ordem_exibicao),
+    [produtos]
+  )
+
+  const setQtdProduto = useCallback((id: string, qtd: string) => {
     setProdutos(prev => prev.map(p => p.id === id ? { ...p, qtd } : p))
-  }
+  }, [])
 
   // ── Render: Aba Lançamento ────────────────────────────────────
   function renderLancamento() {
@@ -466,7 +483,7 @@ export default function AbastecimentoScreen() {
             />
           </View>
         </View>
-        <TouchableOpacity style={styles.filtrarBtn} onPress={carregarHistorico}>
+        <TouchableOpacity style={styles.filtrarBtn} onPress={carregarHistoricoDebounced}>
           <Ionicons name="search-outline" size={15} color="#fff" />
           <Text style={styles.filtrarBtnText}>Buscar</Text>
         </TouchableOpacity>
