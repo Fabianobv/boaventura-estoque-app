@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   View, Text, TouchableOpacity, TextInput, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, FlatList, Modal, SectionList,
+  KeyboardAvoidingView, Platform,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { format, parse, isValid } from "date-fns"
@@ -85,9 +86,9 @@ function Stepper({
     onChange(isNaN(n) ? 0 : n)
   }
   return (
-    <View style={ss.row}>
+    <View style={stepperStyles.row}>
       <TouchableOpacity
-        style={[ss.btn, (disabled || value <= 0) && ss.btnOff]}
+        style={[stepperStyles.btn, (disabled || value <= 0) && stepperStyles.btnOff]}
         onPress={() => !disabled && onChange(Math.max(0, value - 1))}
         disabled={disabled || value <= 0}
         activeOpacity={0.7}
@@ -95,7 +96,7 @@ function Stepper({
         <Ionicons name="remove" size={20} color={disabled || value <= 0 ? "#cbd5e1" : BLUE} />
       </TouchableOpacity>
       <TextInput
-        style={[ss.val, disabled && ss.valOff]}
+        style={[stepperStyles.val, disabled && stepperStyles.valOff]}
         value={String(value)}
         onChangeText={handleText}
         keyboardType="number-pad"
@@ -103,7 +104,7 @@ function Stepper({
         selectTextOnFocus
       />
       <TouchableOpacity
-        style={[ss.btn, disabled && ss.btnOff]}
+        style={[stepperStyles.btn, disabled && stepperStyles.btnOff]}
         onPress={() => !disabled && onChange(value + 1)}
         disabled={disabled}
         activeOpacity={0.7}
@@ -113,7 +114,7 @@ function Stepper({
     </View>
   )
 }
-const ss = StyleSheet.create({
+const stepperStyles = StyleSheet.create({
   row:    { flexDirection: "row", alignItems: "center", gap: 6 },
   btn:    { width: 36, height: 36, borderRadius: 9, backgroundColor: "#e8eef7", alignItems: "center", justifyContent: "center" },
   btnOff: { backgroundColor: "#f1f5f9" },
@@ -151,29 +152,25 @@ export default function ContagemScreen() {
   const [validadoEm,    setValidadoEm]    = useState<string | null>(null)
   const [isValidated,   setIsValidated]   = useState(false)
 
-  const depositoIdsString = useMemo(
-    () => permissions?.deposito_edit_ids?.join(",") ?? "",
-    [permissions?.deposito_edit_ids]
-  )
-
-  // Carrega lista de depósitos (filtrada pelas permissões do usuário)
+  // Carrega lista de depósitos (aguarda permissions)
   useEffect(() => {
+    if (!permissions) return
     supabase.from("depositos")
       .select("id, nome, ativo")
       .eq("ativo", true).order("nome")
       .then(({ data: deps }) => {
         if (deps) {
-          const editIds = permissions?.deposito_edit_ids ?? []
-          const allowed = permissions?.isAdmin
+          const editIds = permissions.deposito_edit_ids ?? []
+          const allowed = permissions.isAdmin
             ? (deps as Deposito[])
             : editIds.length > 0
               ? (deps as Deposito[]).filter(d => editIds.includes(d.id))
-              : []
+              : (deps as Deposito[])
           setDepositos(allowed)
-          if (allowed.length > 0) setDepositoId(allowed[0].id)
+          if (allowed.length > 0 && !depositoId) setDepositoId(allowed[0].id)
         }
       })
-  }, [depositoIdsString, permissions?.isAdmin])
+  }, [permissions])
 
   // Carrega/recarrega itens do dia+depósito
   const carregarContagem = useCallback(async () => {
@@ -211,7 +208,6 @@ export default function ContagemScreen() {
       } else {
         setIsEditing(false)
 
-        // Quem salvou
         const updatedBy = comContagem[0].updated_by
         if (updatedBy && updatedBy !== user?.id) {
           const { data: perfil } = await supabase
@@ -221,7 +217,6 @@ export default function ContagemScreen() {
           setResponsavel(null)
         }
 
-        // Status de validação
         const vBy = comContagem[0].validated_by
         const vAt = comContagem[0].validated_at
         if (vBy) {
@@ -376,8 +371,9 @@ export default function ContagemScreen() {
     )
   }
 
-  return (
-    <View style={styles.container}>
+  // Header scrollável: controles de data/depósito + banners
+  const ListHeader = (
+    <View>
       <View style={styles.controls}>
         <View style={{ marginBottom: 8 }}>
           <Text style={styles.controlLabel}>Data (dd/mm/aaaa)</Text>
@@ -414,13 +410,60 @@ export default function ContagemScreen() {
           </View>
         )
       )}
+    </View>
+  )
+
+  // Footer scrollável: botões de ação (dentro da SectionList)
+  const ListFooter = !loading && itens.length > 0 ? (
+    <View style={styles.footerInList}>
+      {isEditing ? (
+        <TouchableOpacity
+          style={[styles.footerBtn, styles.footerBtnSalvar, saving && { opacity: 0.6 }]}
+          onPress={handleSalvar} disabled={saving} activeOpacity={0.8}>
+          {saving
+            ? <ActivityIndicator color="#fff" />
+            : <><Ionicons name="save-outline" size={18} color="#fff" /><Text style={styles.footerBtnText}>Salvar Contagem</Text></>
+          }
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.footerRow}>
+          <TouchableOpacity
+            style={[styles.footerBtn, styles.footerBtnEditar]}
+            onPress={() => setIsEditing(true)} disabled={saving} activeOpacity={0.8}>
+            <Ionicons name="create-outline" size={18} color="#fff" />
+            <Text style={styles.footerBtnText}>Editar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.footerBtn, isValidated ? styles.footerBtnRevalidar : styles.footerBtnValidar]}
+            onPress={handleValidar} disabled={saving} activeOpacity={0.8}>
+            {saving
+              ? <ActivityIndicator color="#fff" />
+              : <><Ionicons name="shield-checkmark-outline" size={18} color="#fff" /><Text style={styles.footerBtnText}>{isValidated ? "Revalidar" : "Validar"}</Text></>
+            }
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  ) : null
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}>
 
       {loading ? (
-        <ActivityIndicator color={BLUE} style={{ flex: 1, marginTop: 40 }} />
+        <>
+          {ListHeader}
+          <ActivityIndicator color={BLUE} style={{ flex: 1, marginTop: 40 }} />
+        </>
       ) : itens.length === 0 ? (
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Text style={styles.emptyText}>Nenhum produto encontrado.</Text>
-        </View>
+        <>
+          {ListHeader}
+          <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+            <Text style={styles.emptyText}>Nenhum produto encontrado.</Text>
+          </View>
+        </>
       ) : (
         <SectionList
           sections={categorias.map(cat => ({ title: cat, data: itensDeCat(cat) }))}
@@ -429,45 +472,17 @@ export default function ContagemScreen() {
           renderSectionHeader={({ section: { title } }) => (
             <Text style={styles.catHeader}>{title}</Text>
           )}
+          ListHeaderComponent={ListHeader}
+          ListFooterComponent={ListFooter}
           contentContainerStyle={styles.lista}
+          keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); carregarContagem() }} />}
           maxToRenderPerBatch={30}
           updateCellsBatchingPeriod={50}
+          stickySectionHeadersEnabled={false}
         />
       )}
-
-      {!loading && itens.length > 0 && (
-        <View style={styles.footer}>
-          {isEditing ? (
-            <TouchableOpacity
-              style={[styles.footerBtn, styles.footerBtnSalvar, saving && { opacity: 0.6 }]}
-              onPress={handleSalvar} disabled={saving} activeOpacity={0.8}>
-              {saving
-                ? <ActivityIndicator color="#fff" />
-                : <><Ionicons name="save-outline" size={18} color="#fff" /><Text style={styles.footerBtnText}>Salvar Contagem</Text></>
-              }
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.footerRow}>
-              <TouchableOpacity
-                style={[styles.footerBtn, styles.footerBtnEditar]}
-                onPress={() => setIsEditing(true)} disabled={saving} activeOpacity={0.8}>
-                <Ionicons name="create-outline" size={18} color="#fff" />
-                <Text style={styles.footerBtnText}>Editar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.footerBtn, isValidated ? styles.footerBtnRevalidar : styles.footerBtnValidar]}
-                onPress={handleValidar} disabled={saving} activeOpacity={0.8}>
-                {saving
-                  ? <ActivityIndicator color="#fff" />
-                  : <><Ionicons name="shield-checkmark-outline" size={18} color="#fff" /><Text style={styles.footerBtnText}>{isValidated ? "Revalidar" : "Validar"}</Text></>
-                }
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      )}
-    </View>
+    </KeyboardAvoidingView>
   )
 }
 
@@ -490,7 +505,7 @@ const styles = StyleSheet.create({
   bannerOk: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#f0fdf4", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#bbf7d0" },
   bannerValidado: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#dcfce7", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#86efac" },
   bannerText: { fontSize: 13, color: "#92400e", flex: 1 },
-  lista: { padding: 12, paddingBottom: 16 },
+  lista: { paddingHorizontal: 12, paddingBottom: 20 },
   emptyText: { textAlign: "center", color: "#94a3b8", fontSize: 14, marginTop: 40 },
   catHeader: { fontSize: 12, fontWeight: "700", color: "#475569", textTransform: "uppercase", letterSpacing: 0.5, paddingVertical: 6, paddingHorizontal: 4, marginTop: 8, marginBottom: 4 },
   item: { backgroundColor: "#fff", borderRadius: 14, padding: 14, marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
@@ -502,9 +517,9 @@ const styles = StyleSheet.create({
   stepperLine: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
   stepperLineLabel: { fontSize: 13, color: "#475569", fontWeight: "600" },
   difVal: { fontSize: 18, fontWeight: "700" },
-  footer: { padding: 16, backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#e2e8f0" },
+  footerInList: { paddingVertical: 16 },
   footerRow: { flexDirection: "row", gap: 10 },
-  footerBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 50, borderRadius: 12 },
+  footerBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 52, borderRadius: 12 },
   footerBtnSalvar: { backgroundColor: BLUE },
   footerBtnEditar: { backgroundColor: "#d97706" },
   footerBtnValidar: { backgroundColor: "#16a34a" },

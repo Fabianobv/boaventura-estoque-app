@@ -184,7 +184,9 @@ export default function AbastecimentoScreen() {
   const [editSaving,   setEditSaving]  = useState(false)
 
   // ── Carregamento de depósitos e produtos ─────────────────────
+  // Aguarda permissions carregarem para filtrar depósitos corretamente
   useEffect(() => {
+    if (!permissions) return
     Promise.all([
       supabase.from("depositos").select("id, nome, localizacao, ativo").eq("ativo", true).order("nome"),
       supabase.from("produtos")
@@ -193,15 +195,14 @@ export default function AbastecimentoScreen() {
         .order("ordem_exibicao"),
     ]).then(([deps, prods]) => {
       if (deps.data) {
-        // Lançamento: filtra pelos depósitos com permissão de EDIÇÃO
-        const editIds = permissions?.deposito_edit_ids ?? []
-        const allowed = permissions?.isAdmin
+        const editIds = permissions.deposito_edit_ids ?? []
+        const allowed = permissions.isAdmin
           ? (deps.data as Deposito[])
           : editIds.length > 0
             ? (deps.data as Deposito[]).filter(d => editIds.includes(d.id))
-            : []
+            : (deps.data as Deposito[])
         setDepositos(allowed)
-        if (allowed.length > 0) setDepositoId(allowed[0].id)
+        if (allowed.length > 0 && !depositoId) setDepositoId(allowed[0].id)
       }
       if (prods.data) {
         supabase.from("categorias").select("nome, ordem").eq("ativo", true)
@@ -216,7 +217,7 @@ export default function AbastecimentoScreen() {
           })
       }
     })
-  }, [])
+  }, [permissions])
 
   // ── Salvar lançamento (batch) ─────────────────────────────────
   async function handleSalvar() {
