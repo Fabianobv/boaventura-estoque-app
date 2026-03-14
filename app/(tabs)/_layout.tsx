@@ -61,7 +61,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="swap-vertical-outline" color={color} size={size} />
           ),
-          href: permissions?.canAbastecimento !== false ? undefined : null,
+          href: permissions?.canAbastecimento ? undefined : null,
         }}
       />
 

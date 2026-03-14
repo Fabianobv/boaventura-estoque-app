@@ -1,7 +1,7 @@
 /**
  * app/(tabs)/perfil.tsx — Dados do usuário e alteração de senha
  */
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, Alert, ActivityIndicator,
@@ -15,11 +15,27 @@ const BLUE = "#1e3a5f"
 export default function PerfilScreen() {
   const { user, permissions, signOut } = useAuth()
 
-  const [senhaAtual,   setSenhaAtual]   = useState("")
+  const [nomeCompleto, setNomeCompleto] = useState("")
+  const [loadingPerfil, setLoadingPerfil] = useState(true)
+
   const [novaSenha,    setNovaSenha]    = useState("")
   const [confirmaSenha, setConfirmaSenha] = useState("")
   const [salvandoSenha, setSalvandoSenha] = useState(false)
   const [mostrarSenha,  setMostrarSenha]  = useState(false)
+
+  // Carrega nome_completo do perfil
+  useEffect(() => {
+    if (!user?.id) return
+    supabase
+      .from("profiles")
+      .select("nome_completo")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setNomeCompleto(data?.nome_completo ?? "")
+        setLoadingPerfil(false)
+      })
+  }, [user?.id])
 
   async function handleAlterarSenha() {
     if (!novaSenha || !confirmaSenha) {
@@ -39,7 +55,6 @@ export default function PerfilScreen() {
     try {
       const { error } = await supabase.auth.updateUser({ password: novaSenha })
       if (error) throw error
-      setSenhaAtual("")
       setNovaSenha("")
       setConfirmaSenha("")
       Alert.alert("✓ Senha Alterada", "Sua senha foi atualizada com sucesso!")
@@ -52,7 +67,10 @@ export default function PerfilScreen() {
 
   const roleLabel: Record<string, string> = {
     administrador: "Administrador",
+    gerente:       "Gerente",
     operador:      "Operador",
+    motorista:     "Motorista",
+    entregador:    "Entregador",
     visualizador:  "Visualizador",
   }
 
@@ -63,10 +81,19 @@ export default function PerfilScreen() {
       <View style={styles.avatarCard}>
         <View style={styles.avatar}>
           <Text style={styles.avatarLetter}>
-            {user?.email?.charAt(0).toUpperCase() ?? "U"}
+            {(nomeCompleto || user?.email || "U").charAt(0).toUpperCase()}
           </Text>
         </View>
-        <Text style={styles.avatarEmail}>{user?.email ?? "—"}</Text>
+        {loadingPerfil ? (
+          <ActivityIndicator color={BLUE} style={{ marginBottom: 8 }} />
+        ) : (
+          <>
+            {nomeCompleto ? (
+              <Text style={styles.avatarNome}>{nomeCompleto}</Text>
+            ) : null}
+            <Text style={styles.avatarEmail}>{user?.email ?? "—"}</Text>
+          </>
+        )}
         <View style={styles.roleBadge}>
           <Text style={styles.roleText}>
             {roleLabel[permissions?.role ?? ""] ?? permissions?.role ?? "—"}
@@ -77,6 +104,19 @@ export default function PerfilScreen() {
       {/* Informações da conta */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Informações da Conta</Text>
+
+        {nomeCompleto ? (
+          <>
+            <View style={styles.infoRow}>
+              <Ionicons name="person-outline" size={18} color="#64748b" />
+              <View style={{ marginLeft: 10 }}>
+                <Text style={styles.infoLabel}>Nome</Text>
+                <Text style={styles.infoValue}>{nomeCompleto}</Text>
+              </View>
+            </View>
+            <View style={styles.separator} />
+          </>
+        ) : null}
 
         <View style={styles.infoRow}>
           <Ionicons name="mail-outline" size={18} color="#64748b" />
@@ -94,18 +134,6 @@ export default function PerfilScreen() {
             <Text style={styles.infoLabel}>Perfil de acesso</Text>
             <Text style={styles.infoValue}>
               {roleLabel[permissions?.role ?? ""] ?? "—"}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.separator} />
-
-        <View style={styles.infoRow}>
-          <Ionicons name="person-outline" size={18} color="#64748b" />
-          <View style={{ marginLeft: 10 }}>
-            <Text style={styles.infoLabel}>ID do usuário</Text>
-            <Text style={[styles.infoValue, { fontSize: 11, color: "#94a3b8" }]}>
-              {user?.id ?? "—"}
             </Text>
           </View>
         </View>
@@ -193,7 +221,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   avatarLetter: { fontSize: 32, fontWeight: "700", color: "#fff" },
-  avatarEmail:  { fontSize: 16, fontWeight: "600", color: "#1e293b", marginBottom: 8 },
+  avatarNome:   { fontSize: 18, fontWeight: "700", color: "#1e293b", marginBottom: 4 },
+  avatarEmail:  { fontSize: 14, color: "#64748b", marginBottom: 8 },
   roleBadge: {
     backgroundColor: "#eff6ff",
     paddingHorizontal: 12, paddingVertical: 4,

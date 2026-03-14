@@ -188,7 +188,7 @@ export default function AbastecimentoScreen() {
     Promise.all([
       supabase.from("depositos").select("id, nome, localizacao, ativo").eq("ativo", true).order("nome"),
       supabase.from("produtos")
-        .select("id, nome, categoria, marca, is_vasilhame, ordem_exibicao, ativo")
+        .select("id, nome, categoria, marca, peso_kg, tipo, tipo_produto, is_vasilhame, ordem_exibicao, ativo")
         .eq("ativo", true)
         .order("ordem_exibicao"),
     ]).then(([deps, prods]) => {

@@ -2,14 +2,20 @@
  * lib/types.ts — Tipos compartilhados do app
  */
 
-// ─── Roles (espelha os JWT custom claims do sistema web) ───────────
-export type AppRole = "administrador" | "operador" | "visualizador"
+// ─── Roles (espelha profiles.role no banco) ─────────────────────
+export type AppRole =
+  | "administrador"
+  | "gerente"
+  | "operador"
+  | "motorista"
+  | "entregador"
+  | "visualizador"
 
 // ─── Perfil do usuário ─────────────────────────────────────────────
 export interface UserProfile {
   id: string
   nome_completo: string
-  role: "administrador" | "gerente" | "usuario"  // tabela profiles
+  role: AppRole
   ativo: boolean
 }
 
@@ -26,9 +32,10 @@ export interface Produto {
   id: string
   nome: string
   categoria: string
-  marca: "Fogás" | "Amazongás" | "N/A"
+  marca: string         // dinâmico — tabela marcas
   peso_kg: number | null
-  tipo: "Cheio" | "Vazio" | "N/A"
+  tipo: string          // "Cheio" | "Vazio" | "N/A" etc.
+  tipo_produto: "comum" | "vasilhame"
   ordem_exibicao: number
   ativo: boolean
   is_vasilhame: boolean
@@ -52,6 +59,8 @@ export interface EstoqueLinha {
   obs_roubado: string | null
   contagem_final: number
   avariado: number
+  validated_by: string | null
+  validated_at: string | null
   // campos calculados pela view
   saldo_do_dia?: number
   diferenca?: number
@@ -81,12 +90,11 @@ export interface ContagemInput {
 // ─── Permissões do usuário ─────────────────────────────────────────
 export interface UserPermissions {
   role: AppRole
-  isGerente: boolean         // operador ou administrador
-  isAdmin: boolean           // apenas administrador
+  isAdmin: boolean           // administrador (acesso total)
   canAbastecimento: boolean  // pode usar aba Abastecimento
   canContagem: boolean       // pode usar aba Contagem
   // Permissões granulares da tabela user_permissions
   deposito_ids: string[]      // vazio = sem restrição de visualização
-  deposito_edit_ids: string[] // depósitos com permissão de edição (admin: [] = todos)
-  modulos: string[]           // vazio = sem restrição
+  deposito_edit_ids: string[] // depósitos com permissão de edição
+  modulos: string[]           // módulos habilitados via role_permissions
 }

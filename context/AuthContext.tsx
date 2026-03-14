@@ -3,7 +3,10 @@
  *
  * Contexto global de autenticação.
  * Lê a role do usuário via JWT Custom Claims (campo user_role)
- * e carrega as permissões granulares da tabela user_permissions.
+ * e carrega os módulos de role_permissions + permissões granulares de user_permissions.
+ *
+ * O acesso é determinado pelos MÓDULOS habilitados em role_permissions,
+ * não pelo nome do role. Administrador sempre tem acesso total.
  */
 import React, {
   createContext, useContext, useEffect, useState, useCallback, useMemo,
@@ -38,32 +41,29 @@ function getRoleFromSession(session: Session | null): AppRole {
   }
 }
 
-function buildBasePermissions(
+function buildPermissions(
   role: AppRole,
+  modulos: string[],
   deposito_ids: string[],
   deposito_edit_ids: string[],
-  modulos: string[]
 ): UserPermissions {
-  const isAdmin   = role === "administrador"
-  const isGerente = role === "administrador" || role === "operador"
+  const isAdmin = role === "administrador"
 
-  // Se admin, ignora restrições de módulos e depósitos
+  // Admin ignora restrições — acesso total
   const effectiveModulos    = isAdmin ? [] : modulos
   const effectiveDepositos  = isAdmin ? [] : deposito_ids
-  // Admin: [] = todos os depósitos têm edição (interpretado junto com isAdmin nos componentes)
   const effectiveEditIds    = isAdmin ? [] : deposito_edit_ids
 
-  // canAbastecimento: sem restrição de módulo OU módulo app_abastecimento presente
-  const canAbastecimento = effectiveModulos.length === 0
+  // canAbastecimento: admin OU módulo app_abastecimento habilitado
+  const canAbastecimento = isAdmin
     || effectiveModulos.includes("app_abastecimento")
 
-  // canContagem: requer pelo menos operador E (sem restrição OU módulo app_contagem)
-  const canContagem = isGerente
-    && (effectiveModulos.length === 0 || effectiveModulos.includes("app_contagem"))
+  // canContagem: admin OU módulo app_contagem habilitado
+  const canContagem = isAdmin
+    || effectiveModulos.includes("app_contagem")
 
   return {
     role,
-    isGerente,
     isAdmin,
     canAbastecimento,
     canContagem,
@@ -82,21 +82,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<UserPermissions | null>(null)
   const [loading,     setLoading]     = useState(true)
 
-  /** Carrega permissões granulares da tabela user_permissions */
+  /** Carrega módulos do role + permissões granulares do user */
   const loadPermissions = useCallback(async (s: Session, role: AppRole) => {
     try {
-      const { data } = await supabase
+      // 1. Carregar módulos do role via role_permissions
+      const { data: roleData } = await supabase
+        .from("role_permissions")
+        .select("modulos")
+        .eq("role", role)
+        .maybeSingle()
+      const modulos: string[] = roleData?.modulos ?? []
+
+      // 2. Carregar permissões granulares do usuário
+      const { data: userData } = await supabase
         .from("user_permissions")
-        .select("deposito_ids, deposito_edit_ids, modulos")
+        .select("deposito_ids, deposito_edit_ids")
         .eq("user_id", s.user.id)
         .maybeSingle()
-      const deposito_ids: string[]      = data?.deposito_ids      ?? []
-      const deposito_edit_ids: string[] = data?.deposito_edit_ids ?? []
-      const modulos: string[]           = data?.modulos           ?? []
-      setPermissions(buildBasePermissions(role, deposito_ids, deposito_edit_ids, modulos))
+      const deposito_ids: string[]      = userData?.deposito_ids      ?? []
+      const deposito_edit_ids: string[] = userData?.deposito_edit_ids ?? []
+
+      setPermissions(buildPermissions(role, modulos, deposito_ids, deposito_edit_ids))
     } catch {
       // Em caso de falha, usa apenas a role sem restrições adicionais
-      setPermissions(buildBasePermissions(role, [], [], []))
+      setPermissions(buildPermissions(role, [], [], []))
     }
   }, [])
 
@@ -105,7 +114,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(s?.user ?? null)
     if (s) {
       const role = getRoleFromSession(s)
-      // Carrega permissões granulares do banco
       await loadPermissions(s, role)
     } else {
       setPermissions(null)

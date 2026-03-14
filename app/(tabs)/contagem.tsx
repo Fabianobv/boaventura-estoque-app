@@ -2,10 +2,12 @@
  * app/(tabs)/contagem.tsx — Contagem de Estoque
  *
  * Fluxo:
- *  - Sem contagem no dia/depósito → modo edição (steppers ativos + Salvar)
- *  - Contagem salva → modo visualização (Editar + Validar)
- *  - Editar → qualquer usuário volta para modo edição e pode salvar novamente
- *  - Validar → registra validated_by + validated_at no banco
+ *  1. Sem contagem no dia/depósito → modo edição (steppers ativos + botão Salvar no final)
+ *  2. Após salvar → modo visualização com dois botões:
+ *     - Editar → volta para modo edição, pode alterar quantitativos e salvar novamente
+ *     - Validar → marca status 'validado', registra validated_by + validated_at
+ *  3. Após validar → banner verde mostrando quem validou e quando
+ *     - Ainda permite edição posterior (muda status de volta para 'pendente')
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
@@ -74,7 +76,7 @@ function DepositoPicker({
   )
 }
 
-// ─── Stepper com TextInput (idêntico ao Abastecimento) ────────────
+// ─── Stepper com TextInput ────────────────────────────────────────
 function Stepper({
   value, onChange, disabled = false,
 }: { value: number; onChange: (v: number) => void; disabled?: boolean }) {
@@ -136,17 +138,19 @@ interface ItemContagem {
 export default function ContagemScreen() {
   const { user, permissions } = useAuth()
 
-  const [data,        setData]        = useState(hojePT())
-  const [depositoId,  setDepositoId]  = useState("")
-  const [depositos,   setDepositos]   = useState<Deposito[]>([])
-  const [itens,       setItens]       = useState<ItemContagem[]>([])
-  const [loading,     setLoading]     = useState(false)
-  const [saving,      setSaving]      = useState(false)
-  const [refreshing,  setRefreshing]  = useState(false)
-  const [isEditing,   setIsEditing]   = useState(true)   // true = steppers ativos
-  const [responsavel, setResponsavel] = useState<string | null>(null)
+  const [data,          setData]          = useState(hojePT())
+  const [depositoId,    setDepositoId]    = useState("")
+  const [depositos,     setDepositos]     = useState<Deposito[]>([])
+  const [itens,         setItens]         = useState<ItemContagem[]>([])
+  const [loading,       setLoading]       = useState(false)
+  const [saving,        setSaving]        = useState(false)
+  const [refreshing,    setRefreshing]    = useState(false)
+  const [isEditing,     setIsEditing]     = useState(true)
+  const [responsavel,   setResponsavel]   = useState<string | null>(null)
+  const [validadoPor,   setValidadoPor]   = useState<string | null>(null)
+  const [validadoEm,    setValidadoEm]    = useState<string | null>(null)
+  const [isValidated,   setIsValidated]   = useState(false)
 
-  // Memoize deposit IDs string para evitar re-renders desnecessários
   const depositoIdsString = useMemo(
     () => permissions?.deposito_edit_ids?.join(",") ?? "",
     [permissions?.deposito_edit_ids]
@@ -159,7 +163,6 @@ export default function ContagemScreen() {
       .eq("ativo", true).order("nome")
       .then(({ data: deps }) => {
         if (deps) {
-          // Contagem: filtra pelos depósitos com permissão de EDIÇÃO
           const editIds = permissions?.deposito_edit_ids ?? []
           const allowed = permissions?.isAdmin
             ? (deps as Deposito[])
@@ -179,7 +182,6 @@ export default function ContagemScreen() {
     try {
       const isoData = toISO(data)
 
-      // Garante que as linhas do dia existem
       await supabase.rpc("inicializar_lancamento_diario", {
         p_data: isoData,
         p_deposito_id: depositoId,
@@ -190,7 +192,7 @@ export default function ContagemScreen() {
         .select([
           "produto_id", "produto_nome", "produto_categoria", "categoria_ordem",
           "produto_ordem", "saldo_do_dia", "contagem_final", "avariado",
-          "diferenca", "updated_by",
+          "diferenca", "updated_by", "validated_by", "validated_at",
         ].join(","))
         .eq("data_referencia", isoData)
         .eq("deposito_id", depositoId)
@@ -201,32 +203,51 @@ export default function ContagemScreen() {
       const comContagem = linhas.filter(l => l.contagem_final > 0 || l.avariado > 0)
 
       if (comContagem.length === 0) {
-        // Dia sem contagem → começa em modo edição
         setIsEditing(true)
         setResponsavel(null)
+        setValidadoPor(null)
+        setValidadoEm(null)
+        setIsValidated(false)
       } else {
-        // Há contagem salva → modo visualização
         setIsEditing(false)
+
+        // Quem salvou
         const updatedBy = comContagem[0].updated_by
         if (updatedBy && updatedBy !== user?.id) {
           const { data: perfil } = await supabase
-            .from("profiles")
-            .select("nome_completo")
-            .eq("id", updatedBy)
-            .maybeSingle()
+            .from("profiles").select("nome_completo").eq("id", updatedBy).maybeSingle()
           setResponsavel(perfil?.nome_completo ?? "outro usuário")
         } else {
           setResponsavel(null)
+        }
+
+        // Status de validação
+        const vBy = comContagem[0].validated_by
+        const vAt = comContagem[0].validated_at
+        if (vBy) {
+          setIsValidated(true)
+          setValidadoEm(vAt ? format(new Date(vAt), "dd/MM/yyyy HH:mm") : null)
+          if (vBy === user?.id) {
+            setValidadoPor("Você")
+          } else {
+            const { data: perfVal } = await supabase
+              .from("profiles").select("nome_completo").eq("id", vBy).maybeSingle()
+            setValidadoPor(perfVal?.nome_completo ?? "outro usuário")
+          }
+        } else {
+          setIsValidated(false)
+          setValidadoPor(null)
+          setValidadoEm(null)
         }
       }
 
       setItens(
         linhas
-          .sort((a, b) =>
+          .sort((a: any, b: any) =>
             (a.categoria_ordem ?? 99) - (b.categoria_ordem ?? 99) ||
             (a.produto_ordem ?? 99) - (b.produto_ordem ?? 99)
           )
-          .map(l => ({
+          .map((l: any) => ({
             produto_id:      l.produto_id,
             produto_nome:    l.produto_nome,
             produto_categ:   l.produto_categoria,
@@ -249,7 +270,6 @@ export default function ContagemScreen() {
   useEffect(() => { carregarContagem() }, [carregarContagem])
   useEffect(() => onSync(carregarContagem), [carregarContagem])
 
-  // Atualiza um campo de um produto localmente (recalcula diferença)
   function updateItem(produtoId: string, campo: "contagem_final" | "avariado", valor: number) {
     setItens(prev => prev.map(it => {
       if (it.produto_id !== produtoId) return it
@@ -259,7 +279,6 @@ export default function ContagemScreen() {
     }))
   }
 
-  // Salva todos os itens no banco
   async function handleSalvar() {
     setSaving(true)
     try {
@@ -271,12 +290,17 @@ export default function ContagemScreen() {
         contagem_final:  it.contagem_final,
         avariado:        it.avariado,
         updated_by:      user?.id,
+        validated_by:    null,
+        validated_at:    null,
       }))
       const { error } = await supabase
         .from("estoque_diario")
         .upsert(upserts, { onConflict: "data_referencia,deposito_id,produto_id" })
       if (error) throw error
       setIsEditing(false)
+      setIsValidated(false)
+      setValidadoPor(null)
+      setValidadoEm(null)
       setResponsavel(null)
       Alert.alert("✓ Contagem Salva", "Os dados foram registrados com sucesso!")
     } catch (e) {
@@ -286,7 +310,6 @@ export default function ContagemScreen() {
     }
   }
 
-  // Registra quem validou a contagem
   async function handleValidar() {
     Alert.alert(
       "Validar Contagem",
@@ -296,37 +319,40 @@ export default function ContagemScreen() {
         {
           text: "Confirmar", onPress: async () => {
             setSaving(true)
-            const { error } = await supabase
-              .from("estoque_diario")
-              .update({
-                validated_by: user?.id,
-                validated_at: new Date().toISOString(),
-              })
-              .eq("data_referencia", toISO(data))
-              .eq("deposito_id", depositoId)
-            setSaving(false)
-            if (error) { Alert.alert("Erro", error.message); return }
-            Alert.alert("✓ Validado", "Contagem validada com sucesso!")
+            try {
+              const { error } = await supabase
+                .from("estoque_diario")
+                .update({
+                  validated_by: user?.id,
+                  validated_at: new Date().toISOString(),
+                })
+                .eq("data_referencia", toISO(data))
+                .eq("deposito_id", depositoId)
+              if (error) throw error
+              setIsValidated(true)
+              setValidadoPor("Você")
+              setValidadoEm(format(new Date(), "dd/MM/yyyy HH:mm"))
+              Alert.alert("✓ Validado", "Contagem validada com sucesso!")
+            } catch (e) {
+              Alert.alert("Erro", (e as Error).message)
+            } finally {
+              setSaving(false)
+            }
           },
         },
       ]
     )
   }
 
-  // Agrupamento por categoria (memoizado)
   const categorias = useMemo(() => Array.from(new Set(itens.map(i => i.produto_categ))), [itens])
-
   const itensDeCat = useCallback((cat: string) => itens.filter(i => i.produto_categ === cat), [itens])
 
-  // ── Card de um produto ────────────────────────────────────────
   function renderItem(item: ItemContagem) {
     const dif = item.diferenca
     const difColor = dif < 0 ? "#dc2626" : dif > 0 ? "#d97706" : "#16a34a"
     const difStr   = dif > 0 ? `+${dif}` : String(dif)
     return (
       <View key={item.produto_id} style={styles.item}>
-
-        {/* Nome + saldo sistema */}
         <View style={styles.itemHeader}>
           <Text style={styles.itemNome}>{item.produto_nome}</Text>
           <View style={styles.saldoTag}>
@@ -334,59 +360,44 @@ export default function ContagemScreen() {
             <Text style={styles.saldoTagVal}>{item.saldo_calculado}</Text>
           </View>
         </View>
-
-        {/* Contagem Final */}
         <View style={styles.stepperLine}>
           <Text style={styles.stepperLineLabel}>Contagem Final</Text>
-          <Stepper
-            value={item.contagem_final}
-            onChange={v => updateItem(item.produto_id, "contagem_final", v)}
-            disabled={!isEditing}
-          />
+          <Stepper value={item.contagem_final} onChange={v => updateItem(item.produto_id, "contagem_final", v)} disabled={!isEditing} />
         </View>
-
-        {/* Avariado */}
         <View style={styles.stepperLine}>
           <Text style={styles.stepperLineLabel}>Avariado</Text>
-          <Stepper
-            value={item.avariado}
-            onChange={v => updateItem(item.produto_id, "avariado", v)}
-            disabled={!isEditing}
-          />
+          <Stepper value={item.avariado} onChange={v => updateItem(item.produto_id, "avariado", v)} disabled={!isEditing} />
         </View>
-
-        {/* Diferença calculada */}
         <View style={[styles.stepperLine, { borderBottomWidth: 0, paddingBottom: 2 }]}>
           <Text style={styles.stepperLineLabel}>Diferença</Text>
           <Text style={[styles.difVal, { color: difColor }]}>{difStr}</Text>
         </View>
-
       </View>
     )
   }
 
   return (
     <View style={styles.container}>
-
-      {/* Controles: data + depósito */}
       <View style={styles.controls}>
         <View style={{ marginBottom: 8 }}>
           <Text style={styles.controlLabel}>Data (dd/mm/aaaa)</Text>
-          <TextInput
-            style={styles.controlInput}
-            value={data}
-            onChangeText={v => setData(mascararData(v))}
-            placeholder="dd/mm/aaaa"
-            keyboardType="number-pad"
-            maxLength={10}
-          />
+          <TextInput style={styles.controlInput} value={data} onChangeText={v => setData(mascararData(v))} placeholder="dd/mm/aaaa" keyboardType="number-pad" maxLength={10} />
         </View>
         <Text style={styles.controlLabel}>Depósito</Text>
         <DepositoPicker depositos={depositos} value={depositoId} onChange={setDepositoId} />
       </View>
 
-      {/* Banner de status (só no modo visualização) */}
-      {!isEditing && (
+      {!isEditing && isValidated && (
+        <View style={styles.bannerValidado}>
+          <Ionicons name="shield-checkmark" size={16} color="#166534" />
+          <Text style={[styles.bannerText, { color: "#166534" }]}>
+            Validado por <Text style={{ fontWeight: "700" }}>{validadoPor}</Text>
+            {validadoEm ? ` em ${validadoEm}` : ""}
+          </Text>
+        </View>
+      )}
+
+      {!isEditing && !isValidated && (
         responsavel ? (
           <View style={styles.bannerAviso}>
             <Ionicons name="person-circle-outline" size={16} color="#92400e" />
@@ -398,13 +409,12 @@ export default function ContagemScreen() {
           <View style={styles.bannerOk}>
             <Ionicons name="checkmark-circle-outline" size={16} color="#166534" />
             <Text style={[styles.bannerText, { color: "#166534" }]}>
-              Contagem registrada. Toque em Editar para alterar.
+              Contagem salva. Aguardando validação.
             </Text>
           </View>
         )
       )}
 
-      {/* Lista de produtos - agora usa SectionList para melhor performance */}
       {loading ? (
         <ActivityIndicator color={BLUE} style={{ flex: 1, marginTop: 40 }} />
       ) : itens.length === 0 ? (
@@ -413,67 +423,44 @@ export default function ContagemScreen() {
         </View>
       ) : (
         <SectionList
-          sections={categorias.map(cat => ({
-            title: cat,
-            data: itensDeCat(cat),
-          }))}
+          sections={categorias.map(cat => ({ title: cat, data: itensDeCat(cat) }))}
           keyExtractor={(item) => item.produto_id}
           renderItem={({ item }) => renderItem(item)}
           renderSectionHeader={({ section: { title } }) => (
             <Text style={styles.catHeader}>{title}</Text>
           )}
           contentContainerStyle={styles.lista}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); carregarContagem() }}
-            />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); carregarContagem() }} />}
           maxToRenderPerBatch={30}
           updateCellsBatchingPeriod={50}
         />
       )}
 
-      {/* Rodapé com botões de ação */}
       {!loading && itens.length > 0 && (
         <View style={styles.footer}>
           {isEditing ? (
-            /* Modo edição → Salvar */
             <TouchableOpacity
               style={[styles.footerBtn, styles.footerBtnSalvar, saving && { opacity: 0.6 }]}
-              onPress={handleSalvar}
-              disabled={saving}
-              activeOpacity={0.8}>
+              onPress={handleSalvar} disabled={saving} activeOpacity={0.8}>
               {saving
                 ? <ActivityIndicator color="#fff" />
-                : <>
-                    <Ionicons name="save-outline" size={18} color="#fff" />
-                    <Text style={styles.footerBtnText}>Salvar Contagem</Text>
-                  </>
+                : <><Ionicons name="save-outline" size={18} color="#fff" /><Text style={styles.footerBtnText}>Salvar Contagem</Text></>
               }
             </TouchableOpacity>
           ) : (
-            /* Modo visualização → Editar + Validar */
             <View style={styles.footerRow}>
               <TouchableOpacity
                 style={[styles.footerBtn, styles.footerBtnEditar]}
-                onPress={() => setIsEditing(true)}
-                disabled={saving}
-                activeOpacity={0.8}>
+                onPress={() => setIsEditing(true)} disabled={saving} activeOpacity={0.8}>
                 <Ionicons name="create-outline" size={18} color="#fff" />
                 <Text style={styles.footerBtnText}>Editar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.footerBtn, styles.footerBtnValidar]}
-                onPress={handleValidar}
-                disabled={saving}
-                activeOpacity={0.8}>
+                style={[styles.footerBtn, isValidated ? styles.footerBtnRevalidar : styles.footerBtnValidar]}
+                onPress={handleValidar} disabled={saving} activeOpacity={0.8}>
                 {saving
                   ? <ActivityIndicator color="#fff" />
-                  : <>
-                      <Ionicons name="shield-checkmark-outline" size={18} color="#fff" />
-                      <Text style={styles.footerBtnText}>Validar</Text>
-                    </>
+                  : <><Ionicons name="shield-checkmark-outline" size={18} color="#fff" /><Text style={styles.footerBtnText}>{isValidated ? "Revalidar" : "Validar"}</Text></>
                 }
               </TouchableOpacity>
             </View>
@@ -484,104 +471,43 @@ export default function ContagemScreen() {
   )
 }
 
-// ─── Estilos ──────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f1f5f9" },
-
-  // Área de filtros
-  controls: {
-    backgroundColor: "#fff",
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
-  },
+  controls: { backgroundColor: "#fff", padding: 14, borderBottomWidth: 1, borderBottomColor: "#e2e8f0" },
   controlLabel: { fontSize: 12, fontWeight: "600", color: "#475569", marginBottom: 6 },
-  controlInput: {
-    height: 44, borderWidth: 1.5, borderColor: "#e2e8f0",
-    borderRadius: 10, paddingHorizontal: 12, fontSize: 14,
-    color: "#1e293b", backgroundColor: "#f8fafc",
-  },
-
-  // Picker
-  picker: {
-    height: 44, flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between", borderWidth: 1.5,
-    borderColor: "#e2e8f0", borderRadius: 10,
-    paddingHorizontal: 12, backgroundColor: "#f8fafc",
-  },
-  pickerText:        { fontSize: 14, color: "#1e293b", flex: 1 },
+  controlInput: { height: 44, borderWidth: 1.5, borderColor: "#e2e8f0", borderRadius: 10, paddingHorizontal: 12, fontSize: 14, color: "#1e293b", backgroundColor: "#f8fafc" },
+  picker: { height: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1.5, borderColor: "#e2e8f0", borderRadius: 10, paddingHorizontal: 12, backgroundColor: "#f8fafc" },
+  pickerText: { fontSize: 14, color: "#1e293b", flex: 1 },
   pickerPlaceholder: { fontSize: 14, color: "#94a3b8", flex: 1 },
-  overlay:           { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  pickerModal: {
-    backgroundColor: "#fff", borderTopLeftRadius: 20,
-    borderTopRightRadius: 20, padding: 16, maxHeight: "60%",
-  },
-  pickerModalTitle: {
-    fontSize: 16, fontWeight: "700", color: BLUE,
-    marginBottom: 12, textAlign: "center",
-  },
-  pickerItem: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10, marginBottom: 4,
-  },
-  pickerItemActive:     { backgroundColor: BLUE },
-  pickerItemText:       { fontSize: 15, color: "#1e293b" },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  pickerModal: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: "60%" },
+  pickerModalTitle: { fontSize: 16, fontWeight: "700", color: BLUE, marginBottom: 12, textAlign: "center" },
+  pickerItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10, marginBottom: 4 },
+  pickerItemActive: { backgroundColor: BLUE },
+  pickerItemText: { fontSize: 15, color: "#1e293b" },
   pickerItemTextActive: { color: "#fff", fontWeight: "700" },
-
-  // Banners
-  bannerAviso: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#fef3c7", paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: "#fde68a",
-  },
-  bannerOk: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#f0fdf4", paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: "#bbf7d0",
-  },
-  bannerText: { fontSize: 13, color: "#92400e" },
-
-  // Lista
-  lista:     { padding: 12, paddingBottom: 16 },
+  bannerAviso: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#fef3c7", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#fde68a" },
+  bannerOk: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#f0fdf4", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#bbf7d0" },
+  bannerValidado: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#dcfce7", paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#86efac" },
+  bannerText: { fontSize: 13, color: "#92400e", flex: 1 },
+  lista: { padding: 12, paddingBottom: 16 },
   emptyText: { textAlign: "center", color: "#94a3b8", fontSize: 14, marginTop: 40 },
-  catHeader: {
-    fontSize: 12, fontWeight: "700", color: "#475569",
-    textTransform: "uppercase", letterSpacing: 0.5,
-    paddingVertical: 6, paddingHorizontal: 4,
-    marginTop: 8, marginBottom: 4,
-  },
-
-  // Card de produto
-  item: {
-    backgroundColor: "#fff", borderRadius: 14, padding: 14, marginBottom: 10,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
-  },
-  itemHeader: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between", marginBottom: 12,
-  },
-  itemNome:     { fontSize: 15, fontWeight: "700", color: "#1e293b", flex: 1, marginRight: 8 },
-  saldoTag:     { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#f1f5f9", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  saldoTagLabel:{ fontSize: 11, color: "#64748b", fontWeight: "600" },
-  saldoTagVal:  { fontSize: 13, color: "#1e293b", fontWeight: "700" },
-
-  stepperLine: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#f1f5f9",
-  },
+  catHeader: { fontSize: 12, fontWeight: "700", color: "#475569", textTransform: "uppercase", letterSpacing: 0.5, paddingVertical: 6, paddingHorizontal: 4, marginTop: 8, marginBottom: 4 },
+  item: { backgroundColor: "#fff", borderRadius: 14, padding: 14, marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
+  itemHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  itemNome: { fontSize: 15, fontWeight: "700", color: "#1e293b", flex: 1, marginRight: 8 },
+  saldoTag: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#f1f5f9", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  saldoTagLabel: { fontSize: 11, color: "#64748b", fontWeight: "600" },
+  saldoTagVal: { fontSize: 13, color: "#1e293b", fontWeight: "700" },
+  stepperLine: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
   stepperLineLabel: { fontSize: 13, color: "#475569", fontWeight: "600" },
-  difVal:           { fontSize: 18, fontWeight: "700" },
-
-  // Rodapé
-  footer: {
-    padding: 16, backgroundColor: "#fff",
-    borderTopWidth: 1, borderTopColor: "#e2e8f0",
-  },
-  footerRow:        { flexDirection: "row", gap: 10 },
-  footerBtn:        { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 50, borderRadius: 12 },
-  footerBtnSalvar:  { backgroundColor: BLUE },
-  footerBtnEditar:  { backgroundColor: "#d97706" },
+  difVal: { fontSize: 18, fontWeight: "700" },
+  footer: { padding: 16, backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#e2e8f0" },
+  footerRow: { flexDirection: "row", gap: 10 },
+  footerBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 50, borderRadius: 12 },
+  footerBtnSalvar: { backgroundColor: BLUE },
+  footerBtnEditar: { backgroundColor: "#d97706" },
   footerBtnValidar: { backgroundColor: "#16a34a" },
-  footerBtnText:    { color: "#fff", fontSize: 15, fontWeight: "700" },
+  footerBtnRevalidar: { backgroundColor: "#0d9488" },
+  footerBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
 })
