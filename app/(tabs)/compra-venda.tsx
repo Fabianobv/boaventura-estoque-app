@@ -187,7 +187,7 @@ export default function CompraVendaScreen() {
   const { permissions, user } = useAuth()
 
   // Sub-aba principal: compras | vendas | comodato
-  const [mainTab, setMainTab] = useState<"compras"|"vendas"|"comodato">("compras")
+  const [mainTab, setMainTab] = useState<"compras"|"vendas"|"comodato">("vendas")
 
   // Dados compartilhados
   const [depositos, setDepositos] = useState<Deposito[]>([])
@@ -228,7 +228,16 @@ export default function CompraVendaScreen() {
 
   // Depósitos filtrados por tipo
   const depositosMoveis = useMemo(() => depositos.filter(d => d.tipo_deposito === "movel"), [depositos])
+  const temDepositoMovel = depositosMoveis.length > 0
   const todosDepositos = depositos // físicos + móveis podem vender e fazer comodato
+
+  // Tabs visíveis: Compras só aparece se o usuário tem acesso a depósito móvel
+  const tabsVisiveis = useMemo(() => {
+    const tabs: Array<"compras"|"vendas"|"comodato"> = []
+    if (temDepositoMovel) tabs.push("compras")
+    tabs.push("vendas", "comodato")
+    return tabs
+  }, [temDepositoMovel])
 
   if (loadingBase) {
     return (
@@ -242,9 +251,9 @@ export default function CompraVendaScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS==="ios"?"padding":undefined}>
       <View style={st.container}>
-        {/* Seletor de sub-aba */}
+        {/* Seletor de sub-aba — Compras só aparece se tem depósito móvel */}
         <View style={st.tabRow}>
-          {(["compras","vendas","comodato"] as const).map(tab => (
+          {tabsVisiveis.map(tab => (
             <TouchableOpacity
               key={tab}
               style={[st.tabBtn, mainTab===tab && st.tabBtnActive]}
