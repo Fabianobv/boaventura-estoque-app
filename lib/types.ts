@@ -24,6 +24,7 @@ export interface Deposito {
   id: string
   nome: string
   localizacao: string | null
+  tipo_deposito: "fisico" | "movel"
   ativo: boolean
 }
 
@@ -87,12 +88,66 @@ export interface ContagemInput {
   avariado: number
 }
 
+// ─── Compra (nota fiscal) ────────────────────────────────────────────
+export interface CompraItem {
+  id?: string
+  produto_id: string
+  produto_nome?: string
+  quantidade: number
+}
+export interface Compra {
+  id: string
+  data_referencia: string
+  deposito_id: string
+  deposito_nome?: string
+  numero_nota: string
+  created_by: string
+  created_at: string
+  itens: CompraItem[]
+}
+
+// ─── Venda ───────────────────────────────────────────────────────────
+export interface Venda {
+  id: string
+  data_referencia: string
+  deposito_id: string
+  deposito_nome?: string
+  cliente_nome: string
+  produto_id: string
+  produto_nome?: string
+  quantidade: number
+  tipo_venda: "varejo" | "atacado"
+  vasilhame_recolhido: number
+  created_by: string
+  created_at: string
+}
+
+// ─── Comodato ────────────────────────────────────────────────────────
+export interface ComodatoItem {
+  id?: string
+  produto_id: string
+  produto_nome?: string
+  quantidade: number
+}
+export interface Comodato {
+  id: string
+  data_referencia: string
+  deposito_id: string
+  deposito_nome?: string
+  cliente_nome: string
+  tipo: "saida" | "entrada"
+  created_by: string
+  created_at: string
+  itens: ComodatoItem[]
+}
+
 // ─── Permissões do usuário ─────────────────────────────────────────
 export interface UserPermissions {
   role: AppRole
   isAdmin: boolean           // administrador (acesso total)
   canAbastecimento: boolean  // pode usar aba Abastecimento
   canContagem: boolean       // pode usar aba Contagem
+  canCompraVenda: boolean    // pode usar aba Compra e Venda
   // Permissões granulares da tabela user_permissions
   deposito_ids: string[]      // vazio = sem restrição de visualização
   deposito_edit_ids: string[] // depósitos com permissão de edição

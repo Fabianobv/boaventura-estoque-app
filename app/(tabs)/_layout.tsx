@@ -78,7 +78,20 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* Aba 3: Perfil do Usuário */}
+      {/* Aba 3: Compra e Venda */}
+      <Tabs.Screen
+        name="compra-venda"
+        options={{
+          title: "Compra e Venda",
+          tabBarLabel: "Compra/Venda",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="cart-outline" color={color} size={size} />
+          ),
+          href: permissions?.canCompraVenda ? undefined : null,
+        }}
+      />
+
+      {/* Aba 4: Perfil do Usuário */}
       <Tabs.Screen
         name="perfil"
         options={{

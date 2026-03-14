@@ -62,11 +62,16 @@ function buildPermissions(
   const canContagem = isAdmin
     || effectiveModulos.includes("app_contagem")
 
+  // canCompraVenda: admin OU módulo app_compra_venda habilitado
+  const canCompraVenda = isAdmin
+    || effectiveModulos.includes("app_compra_venda")
+
   return {
     role,
     isAdmin,
     canAbastecimento,
     canContagem,
+    canCompraVenda,
     deposito_ids: effectiveDepositos,
     deposito_edit_ids: effectiveEditIds,
     modulos: effectiveModulos,
