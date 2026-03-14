@@ -14,7 +14,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context"
 import { AuthProvider, useAuth } from "@/context/AuthContext"
 
 // ─── Guard de autenticação ─────────────────────────────────────────
-function AuthGuard() {
+function AuthGuard({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
   const router   = useRouter()
   const segments = useSegments()
@@ -33,6 +33,7 @@ function AuthGuard() {
     }
   }, [session, loading, segments, router])
 
+  // Enquanto carrega, mostra APENAS o spinner (sem renderizar as rotas por baixo)
   if (loading) {
     return (
       <View style={styles.loading}>
@@ -41,7 +42,7 @@ function AuthGuard() {
     )
   }
 
-  return null
+  return <>{children}</>
 }
 
 // ─── Layout raiz ───────────────────────────────────────────────────
@@ -49,12 +50,13 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <AuthGuard />
         <StatusBar style="light" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-        </Stack>
+        <AuthGuard>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+          </Stack>
+        </AuthGuard>
       </AuthProvider>
     </SafeAreaProvider>
   )

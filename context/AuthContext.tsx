@@ -9,7 +9,7 @@
  * não pelo nome do role. Administrador sempre tem acesso total.
  */
 import React, {
-  createContext, useContext, useEffect, useState, useCallback, useMemo,
+  createContext, useContext, useEffect, useState, useCallback, useMemo, useRef,
 } from "react"
 import { Session, User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
@@ -73,6 +73,16 @@ function buildPermissions(
   }
 }
 
+/** Executa uma promise com timeout. Rejeita se exceder o limite. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), ms)
+    ),
+  ])
+}
+
 // ─── Contexto ──────────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextValue | null>(null)
 
@@ -81,62 +91,81 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user,        setUser]        = useState<User    | null>(null)
   const [permissions, setPermissions] = useState<UserPermissions | null>(null)
   const [loading,     setLoading]     = useState(true)
+  const processingRef = useRef(false)
 
-  /** Carrega módulos do role + permissões granulares do user */
+  /** Carrega módulos do role + permissões granulares do user (com timeout de 8s) */
   const loadPermissions = useCallback(async (s: Session, role: AppRole) => {
     try {
-      // 1. Carregar módulos do role via role_permissions
-      const { data: roleData } = await supabase
-        .from("role_permissions")
-        .select("modulos")
-        .eq("role", role)
-        .maybeSingle()
-      const modulos: string[] = roleData?.modulos ?? []
+      const result = await withTimeout(
+        Promise.all([
+          supabase
+            .from("role_permissions")
+            .select("modulos")
+            .eq("role", role)
+            .maybeSingle(),
+          supabase
+            .from("user_permissions")
+            .select("deposito_ids, deposito_edit_ids")
+            .eq("user_id", s.user.id)
+            .maybeSingle(),
+        ]),
+        8000
+      )
 
-      // 2. Carregar permissões granulares do usuário
-      const { data: userData } = await supabase
-        .from("user_permissions")
-        .select("deposito_ids, deposito_edit_ids")
-        .eq("user_id", s.user.id)
-        .maybeSingle()
-      const deposito_ids: string[]      = userData?.deposito_ids      ?? []
-      const deposito_edit_ids: string[] = userData?.deposito_edit_ids ?? []
+      const [roleRes, userRes] = result
+      const modulos: string[]          = roleRes.data?.modulos          ?? []
+      const deposito_ids: string[]     = userRes.data?.deposito_ids     ?? []
+      const deposito_edit_ids: string[] = userRes.data?.deposito_edit_ids ?? []
 
       setPermissions(buildPermissions(role, modulos, deposito_ids, deposito_edit_ids))
     } catch {
-      // Em caso de falha, usa apenas a role sem restrições adicionais
+      // Em caso de falha ou timeout, usa apenas a role sem restrições adicionais
       setPermissions(buildPermissions(role, [], [], []))
     }
   }, [])
 
   const applySession = useCallback(async (s: Session | null) => {
-    setSession(s)
-    setUser(s?.user ?? null)
-    if (s) {
-      const role = getRoleFromSession(s)
-      await loadPermissions(s, role)
-    } else {
-      setPermissions(null)
+    // Evita chamadas concorrentes (race condition getSession vs onAuthStateChange)
+    if (processingRef.current) return
+    processingRef.current = true
+    try {
+      setSession(s)
+      setUser(s?.user ?? null)
+      if (s) {
+        const role = getRoleFromSession(s)
+        await loadPermissions(s, role)
+      } else {
+        setPermissions(null)
+      }
+    } finally {
+      processingRef.current = false
+      setLoading(false)
     }
   }, [loadPermissions])
 
   useEffect(() => {
-    // Carrega sessão persistida (SecureStore)
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      await applySession(session)
-      setLoading(false)
-    })
-
-    // Escuta mudanças de estado de autenticação em tempo real
+    // Usa APENAS onAuthStateChange para gerenciar sessão.
+    // Supabase v2 dispara INITIAL_SESSION automaticamente, eliminando
+    // a necessidade de chamar getSession() separadamente e evitando race conditions.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         await applySession(session)
-        setLoading(false)
       }
     )
 
-    return () => subscription.unsubscribe()
-  }, [applySession])
+    // Fallback: se onAuthStateChange não disparar em 5s, desbloqueia o loading
+    const fallbackTimer = setTimeout(() => {
+      if (loading) {
+        console.warn("AuthContext: fallback timer - forcing loading=false")
+        setLoading(false)
+      }
+    }, 5000)
+
+    return () => {
+      subscription.unsubscribe()
+      clearTimeout(fallbackTimer)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const signIn = useCallback(async (
     email: string, password: string
