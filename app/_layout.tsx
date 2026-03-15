@@ -5,19 +5,32 @@
  *  1. Envolve toda a aplicação com AuthProvider
  *  2. Aguarda o carregamento da sessão persisted (SecureStore)
  *  3. Redireciona automaticamente para /login ou /(tabs) conforme estado de auth
+ *
+ * IMPORTANTE: O <Stack> DEVE ser renderizado sempre (mesmo durante loading)
+ * para que o expo-router considere a navegação pronta e esconda a splash screen.
  */
 import { useEffect } from "react"
 import { Stack, useRouter, useSegments } from "expo-router"
+import * as SplashScreen from "expo-splash-screen"
 import { StatusBar } from "expo-status-bar"
-import { View, ActivityIndicator, StyleSheet } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { AuthProvider, useAuth } from "@/context/AuthContext"
+
+// Impede a splash de esconder automaticamente — nós controlamos
+SplashScreen.preventAutoHideAsync().catch(() => {})
 
 // ─── Guard de autenticação ─────────────────────────────────────────
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
   const router   = useRouter()
   const segments = useSegments()
+
+  // Esconde a splash screen assim que o loading terminar
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hideAsync().catch(() => {})
+    }
+  }, [loading])
 
   useEffect(() => {
     if (loading) return
@@ -33,15 +46,9 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [session, loading, segments, router])
 
-  // Enquanto carrega, mostra APENAS o spinner (sem renderizar as rotas por baixo)
-  if (loading) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#1e3a5f" />
-      </View>
-    )
-  }
-
+  // Sempre renderiza o children (Stack) para que o expo-router
+  // considere a navegação pronta. A splash screen nativa cobre tudo
+  // enquanto loading=true, então não precisa de spinner adicional.
   return <>{children}</>
 }
 
@@ -61,12 +68,3 @@ export default function RootLayout() {
     </SafeAreaProvider>
   )
 }
-
-const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#f8fafc",
-  },
-})
