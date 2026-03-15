@@ -54,24 +54,36 @@ function buildPermissions(
   const effectiveDepositos  = isAdmin ? [] : deposito_ids
   const effectiveEditIds    = isAdmin ? [] : deposito_edit_ids
 
-  // canAbastecimento: admin OU módulo app_abastecimento habilitado
-  const canAbastecimento = isAdmin
-    || effectiveModulos.includes("app_abastecimento")
+  /** Helper: admin OU módulo habilitado */
+  const has = (mod: string) => isAdmin || effectiveModulos.includes(mod)
 
-  // canContagem: admin OU módulo app_contagem habilitado
-  const canContagem = isAdmin
-    || effectiveModulos.includes("app_contagem")
+  // Abas principais
+  const canHome           = has("app_home")
+  const canAbastecimento  = has("app_abastecimento")
+  const canContagem       = has("app_contagem")
+  const canCompraVenda    = has("app_compra_venda")
 
-  // canCompraVenda: admin OU módulo app_compra_venda habilitado
-  const canCompraVenda = isAdmin
-    || effectiveModulos.includes("app_compra_venda")
+  // Sub-abas Abastecimento (só se aba principal habilitada)
+  const canAbastLancamento = canAbastecimento && has("app_abast_lancamento")
+  const canAbastHistorico  = canAbastecimento && has("app_abast_historico")
+
+  // Sub-abas Compra e Venda (só se aba principal habilitada)
+  const canCompras  = canCompraVenda && has("app_compras")
+  const canVendas   = canCompraVenda && has("app_vendas")
+  const canComodato = canCompraVenda && has("app_comodato")
 
   return {
     role,
     isAdmin,
+    canHome,
     canAbastecimento,
     canContagem,
     canCompraVenda,
+    canAbastLancamento,
+    canAbastHistorico,
+    canCompras,
+    canVendas,
+    canComodato,
     deposito_ids: effectiveDepositos,
     deposito_edit_ids: effectiveEditIds,
     modulos: effectiveModulos,

@@ -144,12 +144,21 @@ export interface Comodato {
 // ─── Permissões do usuário ─────────────────────────────────────────
 export interface UserPermissions {
   role: AppRole
-  isAdmin: boolean           // administrador (acesso total)
-  canAbastecimento: boolean  // pode usar aba Abastecimento
-  canContagem: boolean       // pode usar aba Contagem
-  canCompraVenda: boolean    // pode usar aba Compra e Venda
+  isAdmin: boolean              // administrador (acesso total)
+  // Abas principais
+  canHome: boolean              // pode ver aba Início
+  canAbastecimento: boolean     // pode ver aba Abastecimento
+  canContagem: boolean          // pode ver aba Contagem
+  canCompraVenda: boolean       // pode ver aba Compra e Venda
+  // Sub-abas Abastecimento
+  canAbastLancamento: boolean   // pode usar sub-aba Lançamento
+  canAbastHistorico: boolean    // pode usar sub-aba Histórico
+  // Sub-abas Compra e Venda
+  canCompras: boolean           // pode usar sub-aba Compras
+  canVendas: boolean            // pode usar sub-aba Vendas
+  canComodato: boolean          // pode usar sub-aba Comodato
   // Permissões granulares da tabela user_permissions
-  deposito_ids: string[]      // vazio = sem restrição de visualização
-  deposito_edit_ids: string[] // depósitos com permissão de edição
-  modulos: string[]           // módulos habilitados via role_permissions
+  deposito_ids: string[]        // vazio = sem restrição de visualização
+  deposito_edit_ids: string[]   // depósitos com permissão de edição
+  modulos: string[]             // módulos habilitados via role_permissions
 }

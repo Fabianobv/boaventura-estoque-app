@@ -159,7 +159,18 @@ const Stepper = React.memo(function Stepper({
 // ─── Tela principal ───────────────────────────────────────────────
 export default function AbastecimentoScreen() {
   const { user, permissions } = useAuth()
-  const [abaAtiva, setAbaAtiva] = useState<"lancamento" | "historico">("lancamento")
+
+  // Sub-abas disponíveis com base nas permissões
+  const subAbas = useMemo(() => {
+    const abas: ("lancamento" | "historico")[] = []
+    if (permissions?.canAbastLancamento) abas.push("lancamento")
+    if (permissions?.canAbastHistorico) abas.push("historico")
+    return abas
+  }, [permissions])
+
+  const [abaAtiva, setAbaAtiva] = useState<"lancamento" | "historico">(
+    subAbas[0] ?? "lancamento"
+  )
 
   // ── Estado: Lançamento ────────────────────────────────────────
   const [dataLanc,    setDataLanc]    = useState(hojePT())
@@ -560,25 +571,35 @@ export default function AbastecimentoScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f1f5f9" }}>
-      {/* Abas internas */}
-      <View style={styles.tabBar}>
-        {(["lancamento", "historico"] as const).map(aba => (
-          <TouchableOpacity
-            key={aba}
-            style={[styles.tabBtn, abaAtiva === aba && styles.tabBtnActive]}
-            onPress={() => setAbaAtiva(aba)}>
-            <Ionicons
-              name={aba === "lancamento" ? "add-circle-outline" : "time-outline"}
-              size={16}
-              color={abaAtiva === aba ? BLUE : "#94a3b8"} />
-            <Text style={[styles.tabBtnText, abaAtiva === aba && styles.tabBtnTextActive]}>
-              {aba === "lancamento" ? "Lançamento" : "Histórico"}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* Abas internas — só mostra se houver mais de uma sub-aba */}
+      {subAbas.length > 1 && (
+        <View style={styles.tabBar}>
+          {subAbas.map(aba => (
+            <TouchableOpacity
+              key={aba}
+              style={[styles.tabBtn, abaAtiva === aba && styles.tabBtnActive]}
+              onPress={() => setAbaAtiva(aba)}>
+              <Ionicons
+                name={aba === "lancamento" ? "add-circle-outline" : "time-outline"}
+                size={16}
+                color={abaAtiva === aba ? BLUE : "#94a3b8"} />
+              <Text style={[styles.tabBtnText, abaAtiva === aba && styles.tabBtnTextActive]}>
+                {aba === "lancamento" ? "Lançamento" : "Histórico"}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
-      {abaAtiva === "lancamento" ? renderLancamento() : renderHistorico()}
+      {abaAtiva === "lancamento" && permissions?.canAbastLancamento
+        ? renderLancamento()
+        : abaAtiva === "historico" && permissions?.canAbastHistorico
+          ? renderHistorico()
+          : subAbas.length === 1 && subAbas[0] === "lancamento"
+            ? renderLancamento()
+            : subAbas.length === 1 && subAbas[0] === "historico"
+              ? renderHistorico()
+              : null}
 
       {/* Modal de edição de lote */}
       <Modal

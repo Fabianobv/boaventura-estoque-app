@@ -231,13 +231,21 @@ export default function CompraVendaScreen() {
   const temDepositoMovel = depositosMoveis.length > 0
   const todosDepositos = depositos // físicos + móveis podem vender e fazer comodato
 
-  // Tabs visíveis: Compras só aparece se o usuário tem acesso a depósito móvel
+  // Tabs visíveis: combina permissões granulares + regra de depósito móvel
   const tabsVisiveis = useMemo(() => {
     const tabs: Array<"compras"|"vendas"|"comodato"> = []
-    if (temDepositoMovel) tabs.push("compras")
-    tabs.push("vendas", "comodato")
+    if (temDepositoMovel && permissions?.canCompras) tabs.push("compras")
+    if (permissions?.canVendas) tabs.push("vendas")
+    if (permissions?.canComodato) tabs.push("comodato")
     return tabs
-  }, [temDepositoMovel])
+  }, [temDepositoMovel, permissions])
+
+  // Ajusta mainTab se a aba atual ficou invisível
+  useEffect(() => {
+    if (tabsVisiveis.length > 0 && !tabsVisiveis.includes(mainTab)) {
+      setMainTab(tabsVisiveis[0])
+    }
+  }, [tabsVisiveis, mainTab])
 
   if (loadingBase) {
     return (
@@ -251,8 +259,8 @@ export default function CompraVendaScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS==="ios"?"padding":undefined}>
       <View style={st.container}>
-        {/* Seletor de sub-aba — Compras só aparece se tem depósito móvel */}
-        <View style={st.tabRow}>
+        {/* Seletor de sub-aba */}
+        {tabsVisiveis.length > 1 && <View style={st.tabRow}>
           {tabsVisiveis.map(tab => (
             <TouchableOpacity
               key={tab}
@@ -264,7 +272,7 @@ export default function CompraVendaScreen() {
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </View>}
 
         {mainTab === "compras" && (
           <ComprasTab depositos={depositosMoveis} produtos={produtos} userId={user?.id ?? ""} />

@@ -61,6 +61,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home-outline" color={color} size={size} />
           ),
+          href: permissions?.canHome ? undefined : null,
         }}
       />
 
