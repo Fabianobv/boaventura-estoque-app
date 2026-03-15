@@ -8,13 +8,10 @@
  */
 import { useEffect } from "react"
 import { Stack, useRouter, useSegments } from "expo-router"
-import * as SplashScreen from "expo-splash-screen"
 import { StatusBar } from "expo-status-bar"
+import { View, ActivityIndicator, StyleSheet } from "react-native"
 import { SafeAreaProvider } from "react-native-safe-area-context"
 import { AuthProvider, useAuth } from "@/context/AuthContext"
-
-// Impede a splash de esconder automaticamente
-SplashScreen.preventAutoHideAsync().catch(() => {})
 
 // ─── Guard de autenticação ─────────────────────────────────────────
 function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -25,19 +22,26 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (loading) return
 
-    // Esconde a splash screen
-    SplashScreen.hideAsync().catch(() => {})
-
     const inAuthGroup = segments[0] === "(auth)"
 
     if (!session && !inAuthGroup) {
+      // Não autenticado → vai para login
       router.replace("/(auth)/login")
     } else if (session && inAuthGroup) {
+      // Já autenticado → vai para as tabs
       router.replace("/(tabs)")
     }
   }, [session, loading, segments, router])
 
-  // Sempre renderiza children (Stack) — a splash nativa cobre tudo durante loading
+  // Enquanto carrega, mostra APENAS o spinner (sem renderizar as rotas por baixo)
+  if (loading) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator size="large" color="#1e3a5f" />
+      </View>
+    )
+  }
+
   return <>{children}</>
 }
 
@@ -57,3 +61,12 @@ export default function RootLayout() {
     </SafeAreaProvider>
   )
 }
+
+const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+  },
+})

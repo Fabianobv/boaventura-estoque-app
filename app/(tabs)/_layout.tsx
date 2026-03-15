@@ -1,9 +1,9 @@
 /**
  * app/(tabs)/_layout.tsx — Navegação por abas
  *
- * IMPORTANTE: Quando permissions é null (carregando), NÃO oculta nenhuma aba.
- * Ocultar abas com href:null durante loading causa crash porque o expo-router
- * não encontra rota para o redirect do index.tsx.
+ * REGRA CRÍTICA: A aba Home (alvo do redirect do index.tsx) NUNCA pode
+ * ter href:null, senão o expo-router não encontra a rota e o app trava.
+ * Usamos href condicional apenas nas abas que NÃO são alvo de redirect.
  */
 import { Tabs, Redirect } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
@@ -30,9 +30,6 @@ export default function TabsLayout() {
 
   if (!session) return <Redirect href="/(auth)/login" />
 
-  // Se permissions ainda não carregou, mostra todas as abas (evita crash)
-  const p = permissions
-
   return (
     <Tabs
       screenOptions={{
@@ -58,7 +55,7 @@ export default function TabsLayout() {
       {/* Rota index (redirect) — oculta na barra */}
       <Tabs.Screen name="index" options={{ href: null }} />
 
-      {/* Aba 0: Home */}
+      {/* Aba 0: Home — SEMPRE visível (é o alvo do redirect do index.tsx) */}
       <Tabs.Screen
         name="home"
         options={{
@@ -67,7 +64,6 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home-outline" color={color} size={size} />
           ),
-          href: !p || p.canHome ? undefined : null,
         }}
       />
 
@@ -80,7 +76,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="swap-vertical-outline" color={color} size={size} />
           ),
-          href: !p || p.canAbastecimento ? undefined : null,
+          href: permissions?.canAbastecimento ? undefined : null,
         }}
       />
 
@@ -93,7 +89,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="clipboard-outline" color={color} size={size} />
           ),
-          href: !p || p.canContagem ? undefined : null,
+          href: permissions?.canContagem ? undefined : null,
         }}
       />
 
@@ -106,7 +102,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cart-outline" color={color} size={size} />
           ),
-          href: !p || p.canCompraVenda ? undefined : null,
+          href: permissions?.canCompraVenda ? undefined : null,
         }}
       />
 
