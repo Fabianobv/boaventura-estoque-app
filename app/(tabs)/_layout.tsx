@@ -1,5 +1,9 @@
 /**
  * app/(tabs)/_layout.tsx — Navegação por abas
+ *
+ * IMPORTANTE: Quando permissions é null (carregando), NÃO oculta nenhuma aba.
+ * Ocultar abas com href:null durante loading causa crash porque o expo-router
+ * não encontra rota para o redirect do index.tsx.
  */
 import { Tabs, Redirect } from "expo-router"
 import { Ionicons } from "@expo/vector-icons"
@@ -17,7 +21,6 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets()
   const [syncing, setSyncing] = useState(false)
 
-  // Debounce para o botão de sincronização (2 segundos)
   const handleSync = useCallback(() => {
     if (syncing) return
     setSyncing(true)
@@ -26,6 +29,9 @@ export default function TabsLayout() {
   }, [syncing])
 
   if (!session) return <Redirect href="/(auth)/login" />
+
+  // Se permissions ainda não carregou, mostra todas as abas (evita crash)
+  const p = permissions
 
   return (
     <Tabs
@@ -61,7 +67,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home-outline" color={color} size={size} />
           ),
-          href: permissions?.canHome ? undefined : null,
+          href: !p || p.canHome ? undefined : null,
         }}
       />
 
@@ -74,7 +80,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="swap-vertical-outline" color={color} size={size} />
           ),
-          href: permissions?.canAbastecimento ? undefined : null,
+          href: !p || p.canAbastecimento ? undefined : null,
         }}
       />
 
@@ -87,7 +93,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="clipboard-outline" color={color} size={size} />
           ),
-          href: permissions?.canContagem ? undefined : null,
+          href: !p || p.canContagem ? undefined : null,
         }}
       />
 
@@ -100,7 +106,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cart-outline" color={color} size={size} />
           ),
-          href: permissions?.canCompraVenda ? undefined : null,
+          href: !p || p.canCompraVenda ? undefined : null,
         }}
       />
 
