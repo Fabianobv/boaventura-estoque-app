@@ -35,14 +35,13 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Bundle JS for Android
+      - name: Enable JS bundling in debug build
         run: |
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --entry-file node_modules/expo-router/entry.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res
+          # React Native debug builds don't bundle JS by default (they expect a Metro dev server).
+          # We need to force bundling so the APK is self-contained and works on real devices.
+          sed -i 's/react {/react {\n        bundleInDebug = true/' android/app/build.gradle
+          echo "--- Patched build.gradle (react block) ---"
+          grep -A 5 "react {" android/app/build.gradle | head -10
 
       - name: Build Debug APK
         working-directory: android
