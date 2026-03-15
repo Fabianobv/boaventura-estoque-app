@@ -35,19 +35,30 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Bundle JS and assets into APK
+      - name: Bundle JS and copy fonts into APK
         run: |
-          # Debug builds don't bundle JS by default (they expect a Metro dev server).
-          # We use react-native bundle to create the JS bundle AND copy all assets
-          # (fonts like Ionicons, images, etc.) to the correct native directories.
+          # 1) Use expo export to create the JS bundle (resolves @/ aliases correctly)
           mkdir -p android/app/src/main/assets
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --entry-file node_modules/expo-router/entry.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res
-          echo "✅ Bundle and assets copied:"
+          npx expo export --platform android 2>&1 | tail -5
+
+          # 2) Copy the Hermes bytecode bundle
+          cp dist/bundles/android-*.hbc android/app/src/main/assets/index.android.bundle
+          echo "✅ JS bundle copied"
+
+          # 3) Copy vector icon fonts to native assets (Ionicons, etc.)
+          FONT_DIR="node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts"
+          if [ -d "$FONT_DIR" ]; then
+            cp "$FONT_DIR"/*.ttf android/app/src/main/assets/
+            echo "✅ Vector icon fonts copied:"
+            ls android/app/src/main/assets/*.ttf 2>/dev/null | head -5
+          fi
+
+          # 4) Also check expo prebuild fonts
+          if [ -d "android/app/src/main/assets/fonts" ]; then
+            echo "✅ Prebuild fonts already present"
+          fi
+
+          echo "📦 Final assets directory:"
           ls -la android/app/src/main/assets/
 
       - name: Build Debug APK
