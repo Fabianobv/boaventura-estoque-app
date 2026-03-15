@@ -35,52 +35,16 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Bundle JS and copy fonts into APK
-        run: |
-          mkdir -p android/app/src/main/assets
-
-          # 1) Use expo export to create the JS bundle (resolves @/ aliases)
-          npx expo export --platform android 2>&1 | tail -10
-          echo "--- dist contents ---"
-          find dist -type f | head -30
-
-          # 2) Find and copy the bundle (could be .hbc or .js)
-          BUNDLE=$(find dist -name "*.hbc" -o -name "_expo/static/js/android/*.js" | head -1)
-          if [ -z "$BUNDLE" ]; then
-            # Try the _expo structure used by newer expo
-            BUNDLE=$(find dist -name "*.js" -path "*android*" | head -1)
-          fi
-          if [ -z "$BUNDLE" ]; then
-            # Fallback: any large JS file in dist
-            BUNDLE=$(find dist -name "*.js" -size +10k | head -1)
-          fi
-
-          if [ -n "$BUNDLE" ]; then
-            cp "$BUNDLE" android/app/src/main/assets/index.android.bundle
-            echo "✅ JS bundle copied from: $BUNDLE"
-          else
-            echo "❌ No bundle found in dist/. Listing all files:"
-            find dist -type f
-            exit 1
-          fi
-
-          # 3) Copy vector icon fonts to native assets (Ionicons, etc.)
-          FONT_DIR="node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts"
-          if [ -d "$FONT_DIR" ]; then
-            cp "$FONT_DIR"/*.ttf android/app/src/main/assets/
-            echo "✅ Vector icon fonts copied"
-          fi
-
-          echo "📦 Final assets directory:"
-          ls -la android/app/src/main/assets/
-
-      - name: Build Debug APK
+      - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: |
+          # Release builds automatically bundle JS + all assets (fonts, images).
+          # Expo prebuild already configures release signing with debug keystore.
+          ./gradlew assembleRelease
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: boaventura-estoque-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 90
