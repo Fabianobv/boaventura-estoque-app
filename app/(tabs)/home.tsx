@@ -27,6 +27,7 @@ interface FaltaItem {
   produto_nome: string
   produto_categoria: string
   diferenca: number
+  preco: number
 }
 
 export default function HomeScreen() {
@@ -71,22 +72,37 @@ export default function HomeScreen() {
       const hoje = format(new Date(), "yyyy-MM-dd")
       const trintaDiasAtras = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), "yyyy-MM-dd")
 
-      const { data: rows, error } = await supabase
-        .from("vw_estoque_calculado")
-        .select("data_referencia, produto_id, produto_nome, produto_categoria, diferenca")
-        .eq("deposito_id", depositoId)
-        .gte("data_referencia", trintaDiasAtras)
-        .lte("data_referencia", hoje)
-        .lt("diferenca", 0)
-        .order("data_referencia", { ascending: false })
+      // Busca faltas e preços em paralelo
+      const [faltasRes, produtosRes] = await Promise.all([
+        supabase
+          .from("vw_estoque_calculado")
+          .select("data_referencia, produto_id, produto_nome, produto_categoria, diferenca")
+          .eq("deposito_id", depositoId)
+          .gte("data_referencia", trintaDiasAtras)
+          .lte("data_referencia", hoje)
+          .lt("diferenca", 0)
+          .order("data_referencia", { ascending: false }),
+        supabase
+          .from("produtos")
+          .select("id, preco")
+          .eq("ativo", true),
+      ])
 
-      if (error) throw error
-      setFaltas((rows ?? []).map((r: any) => ({
+      if (faltasRes.error) throw faltasRes.error
+
+      // Mapa de preços por produto_id
+      const precoMap: Record<string, number> = {}
+      for (const p of produtosRes.data ?? []) {
+        precoMap[p.id] = parseFloat(p.preco) || 0
+      }
+
+      setFaltas((faltasRes.data ?? []).map((r: any) => ({
         data_referencia: r.data_referencia,
         produto_id: r.produto_id,
         produto_nome: r.produto_nome,
         produto_categoria: r.produto_categoria,
         diferenca: r.diferenca,
+        preco: precoMap[r.produto_id] ?? 0,
       })))
     } catch (e) {
       console.error("Erro ao carregar faltas:", e)
@@ -101,7 +117,12 @@ export default function HomeScreen() {
 
   const depositoSelecionado = depositos.find(d => d.id === depositoId)
   const totalFaltas = faltas.reduce((acc, f) => acc + Math.abs(f.diferenca), 0)
+  const totalValor = faltas.reduce((acc, f) => acc + Math.abs(f.diferenca) * f.preco, 0)
   const semFaltas = totalFaltas === 0
+
+  /** Formata número como moeda brasileira */
+  const fmtBRL = (v: number) =>
+    v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
 
   return (
     <View style={st.container}>
@@ -150,17 +171,17 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               ) : (
-                /* Com faltas — resumo */
+                /* Com faltas — resumo com valor em R$ */
                 <View>
                   <View style={st.faltaResumoRow}>
                     <Ionicons name="alert-circle" size={28} color="#dc2626" />
                     <View style={{ marginLeft: 12, flex: 1 }}>
                       <Text style={st.faltaResumoLabel}>Total de Faltas</Text>
-                      <Text style={st.faltaResumoValor}>{totalFaltas} unidade(s)</Text>
+                      <Text style={st.faltaResumoValor}>{fmtBRL(totalValor)}</Text>
                     </View>
                   </View>
                   <Text style={st.faltaSubtexto}>
-                    {faltas.length} produto(s) com falta nos últimos 30 dias
+                    {totalFaltas} unidade(s) em {faltas.length} produto(s) nos últimos 30 dias
                   </Text>
                 </View>
               )}

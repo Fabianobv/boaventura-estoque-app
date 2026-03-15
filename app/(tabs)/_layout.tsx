@@ -39,9 +39,9 @@ export default function TabsLayout() {
           backgroundColor: "#fff",
           borderTopColor: "#e2e8f0",
           paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
-          height: 60 + (insets.bottom > 0 ? insets.bottom : 8),
+          height: 56 + (insets.bottom > 0 ? insets.bottom : 8),
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        tabBarShowLabel: false,
         headerStyle: { backgroundColor: BLUE },
         headerTintColor: "#fff",
         headerTitleStyle: { fontWeight: "700", fontSize: 17 },
@@ -60,7 +60,6 @@ export default function TabsLayout() {
         name="home"
         options={{
           title: "Início",
-          tabBarLabel: "Início",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home-outline" color={color} size={size} />
           ),
@@ -72,7 +71,6 @@ export default function TabsLayout() {
         name="abastecimento"
         options={{
           title: "Abastecimento",
-          tabBarLabel: "Abastec.",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="swap-vertical-outline" color={color} size={size} />
           ),
@@ -85,7 +83,6 @@ export default function TabsLayout() {
         name="contagem"
         options={{
           title: "Contagem de Estoque",
-          tabBarLabel: "Contagem",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="clipboard-outline" color={color} size={size} />
           ),
@@ -98,7 +95,6 @@ export default function TabsLayout() {
         name="compra-venda"
         options={{
           title: "Compra e Venda",
-          tabBarLabel: "Compra/Venda",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cart-outline" color={color} size={size} />
           ),
@@ -111,7 +107,6 @@ export default function TabsLayout() {
         name="perfil"
         options={{
           title: "Meu Perfil",
-          tabBarLabel: "Perfil",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-circle-outline" color={color} size={size} />
           ),
