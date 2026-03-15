@@ -619,32 +619,41 @@ function VendasTab({ depositos, produtos, userId }: {
 
         // Encontra o vasilhame vinculado ao produto vendido
         const vasilhames = produtos.filter(p => p.is_vasilhame)
-        let vasilhameVinculado = vasilhames.find(v => v.peso_kg != null && produto.peso_kg != null && Number(v.peso_kg) === Number(produto.peso_kg))
-        if (!vasilhameVinculado) {
-          // Para linha doméstica (13, 10, 8, 7, 5kg), usar "Vasilhame Doméstico"
-          vasilhameVinculado = vasilhames.find(v => v.nome.toLowerCase().includes("doméstico"))
-            || vasilhames[0]
-        }
-        const nomeVasilhame = vasilhameVinculado?.nome ?? "vasilhame"
-
-        Alert.alert(
-          "Lançar Comodato?",
-          `Diferença de ${qtdComodato} vasilhame(s) detectada.\nProduto: ${nomeVasilhame}\nTipo: ${labelTipo}\nDeseja lançar o comodato automaticamente?`,
-          [
-            { text: "Não", style: "cancel" },
-            { text: "Sim, Lançar", onPress: async () => {
-              try {
-                await supabase.rpc("inserir_comodato", {
-                  p_data: toISO(data),
-                  p_deposito_id: deposito.id,
-                  p_cliente: cliente.trim(),
-                  p_tipo: tipoComodato,
-                  p_itens: [{ produto_id: vasilhameVinculado?.id ?? produto.id, quantidade: qtdComodato }],
-                })
-              } catch (e: any) { Alert.alert("Erro no comodato", e.message) }
-            }},
-          ]
+        let vasilhameVinculado = vasilhames.find(v =>
+          v.peso_kg != null && produto.peso_kg != null && Number(v.peso_kg) === Number(produto.peso_kg)
         )
+        if (!vasilhameVinculado) {
+          // Água → Galão de 20L
+          const catLower = (produto.categoria ?? "").toLowerCase()
+          if (catLower.includes("água") || catLower.includes("agua")) {
+            vasilhameVinculado = vasilhames.find(v => v.nome.toLowerCase().includes("galão") || v.nome.toLowerCase().includes("galao"))
+          }
+        }
+        if (!vasilhameVinculado) {
+          // Linha doméstica e outros → "Vasilhame Doméstico"
+          vasilhameVinculado = vasilhames.find(v => v.nome.toLowerCase().includes("doméstico") || v.nome.toLowerCase().includes("domestico"))
+        }
+        // Só oferece auto-comodato se encontrou um vasilhame real (nunca usa produto comum)
+        if (vasilhameVinculado) {
+          Alert.alert(
+            "Lançar Comodato?",
+            `Diferença de ${qtdComodato} vasilhame(s) detectada.\nProduto: ${vasilhameVinculado.nome}\nTipo: ${labelTipo}\nDeseja lançar o comodato automaticamente?`,
+            [
+              { text: "Não", style: "cancel" },
+              { text: "Sim, Lançar", onPress: async () => {
+                try {
+                  await supabase.rpc("inserir_comodato", {
+                    p_data: toISO(data),
+                    p_deposito_id: deposito.id,
+                    p_cliente: cliente.trim(),
+                    p_tipo: tipoComodato,
+                    p_itens: [{ produto_id: vasilhameVinculado!.id, quantidade: qtdComodato }],
+                  })
+                } catch (e: any) { Alert.alert("Erro no comodato", e.message) }
+              }},
+            ]
+          )
+        }
       }
 
       Alert.alert("Sucesso", "Venda registrada!")
@@ -827,9 +836,11 @@ function ComodatoTab({ depositos, produtos, userId }: {
   const [historico, setHistorico] = useState<Comodato[]>([])
   const [loadingHist, setLoadingHist] = useState(false)
 
+  // Comodato: mostrar APENAS vasilhames (não produtos comuns)
   const produtosPorCat = useMemo(() => {
     const map: Record<string, Produto[]> = {}
     for (const p of produtos) {
+      if (!p.is_vasilhame) continue // só vasilhames no comodato
       if (!map[p.categoria]) map[p.categoria] = []
       map[p.categoria].push(p)
     }
@@ -844,7 +855,7 @@ function ComodatoTab({ depositos, produtos, userId }: {
     if (!deposito) return Alert.alert("Erro", "Selecione um depósito.")
     if (!cliente.trim()) return Alert.alert("Erro", "Informe o nome do cliente.")
     const itens = Object.entries(qtds).filter(([,q]) => q > 0).map(([pid,q]) => ({ produto_id: pid, quantidade: q }))
-    if (itens.length === 0) return Alert.alert("Erro", "Adicione pelo menos 1 produto.")
+    if (itens.length === 0) return Alert.alert("Erro", "Adicione pelo menos 1 vasilhame.")
 
     setSaving(true)
     try {
