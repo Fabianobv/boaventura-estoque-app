@@ -35,16 +35,19 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Bundle JS into APK assets
+      - name: Bundle JS and assets into APK
         run: |
-          # Debug builds don't bundle JS (they expect a Metro dev server).
-          # We manually create the bundle and place it in the assets directory
-          # so the APK is fully self-contained and works on real devices.
+          # Debug builds don't bundle JS by default (they expect a Metro dev server).
+          # We use react-native bundle to create the JS bundle AND copy all assets
+          # (fonts like Ionicons, images, etc.) to the correct native directories.
           mkdir -p android/app/src/main/assets
-          npx expo export --platform android
-          # Copy the Hermes bytecode bundle to where the native app expects it
-          cp dist/_expo/static/js/android/*.hbc android/app/src/main/assets/index.android.bundle
-          echo "✅ Bundle copied to assets:"
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file node_modules/expo-router/entry.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
+          echo "✅ Bundle and assets copied:"
           ls -la android/app/src/main/assets/
 
       - name: Build Debug APK
