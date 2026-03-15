@@ -9,7 +9,7 @@
  *  3. Após validar → banner verde mostrando quem validou e quando
  *     - Ainda permite edição posterior (muda status de volta para 'pendente')
  */
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   View, Text, TouchableOpacity, TextInput, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, FlatList, Modal, SectionList,
@@ -262,8 +262,22 @@ export default function ContagemScreen() {
     }
   }, [data, depositoId, user?.id])
 
-  useEffect(() => { carregarContagem() }, [carregarContagem])
-  useEffect(() => onSync(carregarContagem), [carregarContagem])
+  // Só carrega quando a data é completa (10 chars) e válida (dd/MM/yyyy)
+  const dataValida = useMemo(() => {
+    if (data.length !== 10) return false
+    const parsed = parse(data, "dd/MM/yyyy", new Date())
+    if (!isValid(parsed)) return false
+    const day = parsed.getDate()
+    const month = parsed.getMonth() + 1
+    const year = parsed.getFullYear()
+    const [dd, mm, yyyy] = data.split("/").map(Number)
+    return dd === day && mm === month && yyyy === year && year >= 2020 && year <= 2099
+  }, [data])
+
+  useEffect(() => {
+    if (dataValida && depositoId) carregarContagem()
+  }, [dataValida, depositoId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => onSync(() => { if (dataValida && depositoId) carregarContagem() }), [dataValida, depositoId, carregarContagem])
 
   function updateItem(produtoId: string, campo: "contagem_final" | "avariado", valor: number) {
     setItens(prev => prev.map(it => {

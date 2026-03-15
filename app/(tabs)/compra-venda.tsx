@@ -270,7 +270,7 @@ export default function CompraVendaScreen() {
           <ComprasTab depositos={depositosMoveis} produtos={produtos} userId={user?.id ?? ""} />
         )}
         {mainTab === "vendas" && (
-          <VendasTab depositos={todosDepositos} produtos={produtos} userId={user?.id ?? ""} />
+          <VendasTab depositos={depositosMoveis} produtos={produtos} userId={user?.id ?? ""} />
         )}
         {mainTab === "comodato" && (
           <ComodatoTab depositos={todosDepositos} produtos={produtos} userId={user?.id ?? ""} />
@@ -609,9 +609,19 @@ function VendasTab({ depositos, produtos, userId }: {
         const qtdComodato = Math.abs(diferencaVasilhame)
         const labelTipo = tipoComodato === "saida" ? "Saída (empréstimo)" : "Entrada (retorno)"
 
+        // Encontra o vasilhame vinculado ao produto vendido
+        const vasilhames = produtos.filter(p => p.is_vasilhame)
+        let vasilhameVinculado = vasilhames.find(v => v.peso_kg != null && produto.peso_kg != null && Number(v.peso_kg) === Number(produto.peso_kg))
+        if (!vasilhameVinculado) {
+          // Para linha doméstica (13, 10, 8, 7, 5kg), usar "Vasilhame Doméstico"
+          vasilhameVinculado = vasilhames.find(v => v.nome.toLowerCase().includes("doméstico"))
+            || vasilhames[0]
+        }
+        const nomeVasilhame = vasilhameVinculado?.nome ?? "vasilhame"
+
         Alert.alert(
           "Lançar Comodato?",
-          `Diferença de ${qtdComodato} vasilhame(s) detectada.\nTipo: ${labelTipo}\nDeseja lançar o comodato automaticamente?`,
+          `Diferença de ${qtdComodato} vasilhame(s) detectada.\nProduto: ${nomeVasilhame}\nTipo: ${labelTipo}\nDeseja lançar o comodato automaticamente?`,
           [
             { text: "Não", style: "cancel" },
             { text: "Sim, Lançar", onPress: async () => {
@@ -621,7 +631,7 @@ function VendasTab({ depositos, produtos, userId }: {
                   p_deposito_id: deposito.id,
                   p_cliente: cliente.trim(),
                   p_tipo: tipoComodato,
-                  p_itens: [{ produto_id: produto.id, quantidade: qtdComodato }],
+                  p_itens: [{ produto_id: vasilhameVinculado?.id ?? produto.id, quantidade: qtdComodato }],
                 })
               } catch (e: any) { Alert.alert("Erro no comodato", e.message) }
             }},

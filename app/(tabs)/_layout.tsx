@@ -52,6 +52,18 @@ export default function TabsLayout() {
       {/* Rota index (redirect) — oculta na barra */}
       <Tabs.Screen name="index" options={{ href: null }} />
 
+      {/* Aba 0: Home */}
+      <Tabs.Screen
+        name="home"
+        options={{
+          title: "Início",
+          tabBarLabel: "Início",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" color={color} size={size} />
+          ),
+        }}
+      />
+
       {/* Aba 1: Abastecimento / Retirada */}
       <Tabs.Screen
         name="abastecimento"

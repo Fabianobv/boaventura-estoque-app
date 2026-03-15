@@ -301,6 +301,10 @@ export default function AbastecimentoScreen() {
 
   // ── Agrupar histórico em lotes ────────────────────────────────
   const lotes = useMemo<Lote[]>(() => {
+    // Mapa de ordem das categorias
+    const catOrdemMap: Record<string, number> = {}
+    produtos.forEach(p => { if (!catOrdemMap[p.categoria]) catOrdemMap[p.categoria] = p.categoria_ordem })
+
     const map = new Map<string, MovimentoHistorico[]>()
     historico.forEach(m => {
       const minuto = m.created_at.substring(0, 16)
@@ -317,9 +321,12 @@ export default function AbastecimentoScreen() {
         deposito_nome: movs[0].deposito_nome,
         tipo: movs[0].tipo,
         created_at: movs[0].created_at,
-        movimentos: movs,
+        movimentos: movs.sort((a, b) =>
+          (catOrdemMap[a.produto_categ] ?? 99) - (catOrdemMap[b.produto_categ] ?? 99)
+          || a.produto_nome.localeCompare(b.produto_nome)
+        ),
       }))
-  }, [historico])
+  }, [historico, produtos])
 
   // ── Abrir modal edição de lote ────────────────────────────────
   function abrirEditarLote(lote: Lote) {
@@ -606,17 +613,29 @@ export default function AbastecimentoScreen() {
               onChange={setEditDeposito}
             />
 
-            {/* Produtos do lote */}
+            {/* Produtos do lote (agrupados por categoria) */}
             <ScrollView style={{ marginTop: 14 }} keyboardShouldPersistTaps="handled">
-              {editLote?.movimentos.map(m => (
-                <View key={m.id} style={styles.loteEditRow}>
-                  <Text style={styles.loteEditProd} numberOfLines={2}>{m.produto_nome}</Text>
-                  <Stepper
-                    value={editQtds[m.id] ?? String(m.quantidade)}
-                    onChange={v => setEditQtds(prev => ({ ...prev, [m.id]: v }))}
-                  />
-                </View>
-              ))}
+              {(() => {
+                if (!editLote) return null
+                const categs: string[] = []
+                editLote.movimentos.forEach(m => {
+                  if (!categs.includes(m.produto_categ)) categs.push(m.produto_categ)
+                })
+                return categs.map(cat => (
+                  <View key={cat}>
+                    <Text style={{ fontSize: 11, fontWeight: "700", color: "#64748b", marginTop: 8, marginBottom: 4, textTransform: "uppercase" }}>{cat}</Text>
+                    {editLote.movimentos.filter(m => m.produto_categ === cat).map(m => (
+                      <View key={m.id} style={styles.loteEditRow}>
+                        <Text style={styles.loteEditProd} numberOfLines={2}>{m.produto_nome}</Text>
+                        <Stepper
+                          value={editQtds[m.id] ?? String(m.quantidade)}
+                          onChange={v => setEditQtds(prev => ({ ...prev, [m.id]: v }))}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                ))
+              })()}
             </ScrollView>
 
             {/* Ações */}
